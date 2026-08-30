@@ -6,9 +6,13 @@ MÁV's OTP-style GraphQL endpoint. Reachable only from a Hungarian IP, so every 
 What the responses actually contain, field by field and with counts, is in
 **`plan/findings.md`**. This file is the query and the contract.
 
-The endpoint URL is **not in this repo**. It comes from an env var — `UPSTREAM_URL` in
-`.env.local`, gitignored and never committed. It is present on the machine and verified
-working; the route handler reads it the same way.
+Neither the MÁV endpoint nor the proxy's address is **in this repo**. Both come from env
+vars in `.env.local`, gitignored and never committed: `GRAPHQL_ENDPOINT` and
+`PROXY_ENDPOINT`, plus `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` for the
+Cloudflare Access service token the proxy is behind. The route handler POSTs
+`{ url: GRAPHQL_ENDPOINT, headers: { 'User-Agent': ... }, query }` to `PROXY_ENDPOINT`
+with the two `CF-Access-Client-*` headers on its own request, and the proxy hands MÁV's
+answer back unchanged. Full rules in `SPEC.md` §1.
 
 ---
 

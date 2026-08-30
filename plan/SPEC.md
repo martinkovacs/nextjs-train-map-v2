@@ -83,7 +83,7 @@ The upstream needs a Hungarian IP, hence the VPS; it does nothing else, so treat
 
 ### Routes, timeouts and environment
 
-Five route handlers and one env var. Nothing else talks to a third party.
+Five route handlers and four env vars. Nothing else talks to a third party.
 
 | Route | Upstream | Cache |
 | --- | --- | --- |
@@ -148,8 +148,18 @@ Five route handlers and one env var. Nothing else talks to a third party.
   ever sees it.
 - **Upstream timeout 10 s**, via `AbortSignal.timeout`; this is what §10 #4's `504` is raised from.
   vagonweb gets the same 10 s.
-- **`UPSTREAM_URL`** — the MÁV endpoint via the VPS. `.env.local`, never committed.
-- **No second env var.** `vlak.php` wants *a* `Referer` and does not care which, so send
+- **Four env vars, all in `.env.local`, never committed, and all four required** — a missing one
+  is §10 #2, the same failure as any other unusable configuration:
+  - **`PROXY_ENDPOINT`** — the VPS proxy. Every MÁV call is a `POST` to it with the JSON body
+    `{ url, headers, query }`; it POSTs `{query}` to `url` with `headers` attached and returns the
+    answer unchanged. It rate-limits at 10 requests a minute and 100 a day, which the 30 s poll
+    behind a 30 s CDN cache (~2/min) fits under; a 429 arrives as `{"error": "Rate Limit Error"}`.
+  - **`GRAPHQL_ENDPOINT`** — the MÁV endpoint, sent as the `url` field of that body rather than
+    being part of the address the app calls.
+  - **`CF_ACCESS_CLIENT_ID`** / **`CF_ACCESS_CLIENT_SECRET`** — the Cloudflare Access service token
+    for the proxy, sent as `CF-Access-Client-Id` and `CF-Access-Client-Secret` **on the request to
+    the proxy**. They are never put in the body's `headers`, which is what MÁV sees.
+- **Nothing else is configurable.** `vlak.php` wants *a* `Referer` and does not care which, so send
   **`https://www.vagonweb.cz/`** as a constant; tile requests come from the browser, which sets its
   own. The `User-Agent` names the app, without a URL.
 
@@ -1579,7 +1589,7 @@ states of a train doing what it is supposed to be doing.
 both pre-build reviews (16 and 18 Aug 2026) and the two geometry questions measured against the
 live API on 18 Aug (written up in `findings.md`, rule in §1). Those responses were **not** kept,
 so the route line is the one piece with no fixture behind it and is developed against the live
-query. `UPSTREAM_URL` is supplied and verified.
+query. The four env vars of §1 are supplied and verified.
 
 Two closures worth keeping, because they look like open questions:
 

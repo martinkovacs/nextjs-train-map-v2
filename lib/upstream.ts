@@ -82,21 +82,50 @@ type UpstreamResult =
   | { kind: 'network'; detail: string; elapsed: number }
   | { kind: 'response'; res: Response; elapsed: number };
 
-/** POST the query through the VPS with the 10 s timeout SPEC 10 #4's 504 is raised from. */
+/** POST the query through the VPS with the 10 s timeout SPEC 10 #4's 504 is raised from.
+ *
+ *  The proxy takes one JSON body, `{ url, headers, query }`: it POSTs `{query}` to `url`
+ *  with `headers` attached and hands the answer back unchanged, so GRAPHQL_ENDPOINT is
+ *  data in the request rather than part of the address. `headers` is what MÁV sees; the
+ *  two CF-Access-Client-* headers are ours to the proxy, which sits behind Cloudflare
+ *  Access, and must not be forwarded on. All four vars are required: without any one of
+ *  them the request cannot be made, so it fails as #2 rather than silently degrading. */
 export async function postUpstream(query: string): Promise<UpstreamResult> {
-  const url = process.env.UPSTREAM_URL;
-  if (!url) {
+  const proxy = process.env.PROXY_ENDPOINT;
+  const endpoint = process.env.GRAPHQL_ENDPOINT;
+  const cfId = process.env.CF_ACCESS_CLIENT_ID;
+  const cfSecret = process.env.CF_ACCESS_CLIENT_SECRET;
+  const missing = (
+    [
+      ['PROXY_ENDPOINT', proxy],
+      ['GRAPHQL_ENDPOINT', endpoint],
+      ['CF_ACCESS_CLIENT_ID', cfId],
+      ['CF_ACCESS_CLIENT_SECRET', cfSecret],
+    ] as const
+  )
+    .filter(([, v]) => !v)
+    .map(([name]) => name);
+  if (missing.length) {
     return {
       kind: 'no-env' as const,
-      detail: 'Error: Missing UPSTREAM_URL',
+      detail: `Error: Missing ${missing.join(', ')}`,
     };
   }
   const started = Date.now();
   try {
-    const res = await fetch(url, {
+    const res = await fetch(proxy!, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'User-Agent': 'vonatinfo/1.0' },
-      body: JSON.stringify({ query }),
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'vonatinfo/1.0',
+        'CF-Access-Client-Id': cfId!,
+        'CF-Access-Client-Secret': cfSecret!,
+      },
+      body: JSON.stringify({
+        url: endpoint,
+        headers: { 'User-Agent': 'vonatinfo/1.0' },
+        query,
+      }),
       signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       cache: 'no-store',
     });
