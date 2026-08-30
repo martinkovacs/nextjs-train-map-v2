@@ -1,0 +1,499 @@
+@import "tailwindcss";
+
+/* ============================================================================
+   Tokens — SPEC.md §2, complete. Light theme only in v1, but every colour is a
+   custom property, so dark mode is a second block plus a basemap swap with no
+   component changes. Tokens nothing reads yet (--di-slight, --di-late,
+   --di-severe) are defined anyway: a missing token becomes a hex literal, and a
+   hex literal in a component means a token is missing.
+   ============================================================================ */
+
+:root {
+  --sans: var(--font-geist-sans);
+  --mono: var(--font-geist-mono);
+
+  /* delay scale: fills, for shapes — marker rings and the 7 px dot */
+  --d-early:#0ea5e9;  --d-ontime:#16a34a;  --d-slight:#eab308;
+  --d-late:#f97316;   --d-severe:#dc2626;  --d-unknown:#8b93a3;
+
+  /* the same five buckets darkened for text. Never on a marker or a dot.
+     Only three are ever used (On time, early, No data) because a written delay
+     is --red in every bucket; the rest stay defined as the correct darkenings. */
+  --di-early:#0369a1; --di-ontime:#15803d; --di-slight:#a16207;
+  --di-late:#c2410c;  --di-severe:#b91c1c; --di-unknown:#6b7280;
+
+  --w:#ffffff;  --w-2:#f5f6f8;  --w-line:#e3e6ec;  --w-ink:#12141a;  --w-ink-2:#5b6272;
+
+  /* timeline progress */
+  --past:#c3c9d4;  --now:#2563eb;  --future:#94a3b8;
+
+  /* the marker's contrast rings and wedge. A structural colour, not an ink:
+     in dark mode it inverts to hold contrast against a dark basemap. */
+  --marker-ink:#14161c;
+
+  --ok:#15803d;      /* on-time times, confirmed platform */
+  --muted:#9aa1ae;   /* struck-through scheduled times, meta text */
+
+  /* amber: "200 OK but do not trust it" */
+  --amber:#92400e;  --amber-bg:#fffbeb;  --amber-border:#fde68a;
+
+  /* blue: informational, and the info-service blocks */
+  --info:#1e40af;  --info-bg:#f1f5fd;  --info-border:#dbe4f6;  --info-range:#5b78a8;
+
+  /* search */
+  --sel-bg:#eef2ff;  --sel-outline:#c7d2fe;  --mark:#fde68a;
+
+  /* the red scale. One ramp for every red; no red is ever hardcoded. */
+  --red-dark:#7f1d1d; --red:#b91c1c; --red-soft:#ef4444;
+  --red-bg:#fef2f2;   --red-border:#fecaca;
+
+  --radius:12px;
+  --shadow:0 8px 28px rgba(0,0,0,.28);
+}
+
+@theme inline {
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+}
+
+/* MNR2007: MÁV's own pictogram font, shipped whole as WOFF2 (SPEC.md §2).
+   The only font glyphs in the app; every other icon is an inline SVG. */
+@font-face {
+  font-family: "MNR2007";
+  src: url("/fonts/MNR2007.woff2") format("woff2");
+  font-display: swap;
+}
+
+html, body { height: 100%; margin: 0 }
+body {
+  font-family: var(--sans);
+  color: var(--w-ink);
+  background: var(--w-2);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ---- shared primitives --------------------------------------------------- */
+.card { background:var(--w); color:var(--w-ink); border-radius:10px;
+        box-shadow:var(--shadow); border:1px solid rgba(0,0,0,.06) }
+/* every inline icon: block-level SVG in a centred flex row — no baseline drift */
+.ic { flex:none; display:block }
+.icrow { display:flex; align-items:center; gap:7px; min-width:0 }
+.ell { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.num { font-family:var(--mono); font-variant-numeric:tabular-nums }
+.x { border:none; background:none; cursor:pointer; padding:3px; line-height:0;
+     color:#9aa1ae; flex:none }
+
+/* the MNR badge, in all three places (hover card, panel, search rows) */
+.mnr { font-family:"MNR2007", var(--mono); font-weight:400 }
+.badge { display:inline-flex; align-items:center; justify-content:center; min-width:34px;
+         height:20px; padding:0 6px; border-radius:4px; background:var(--type,#274F96);
+         color:#fff; font:700 12px/1 var(--sans); flex:none }
+/* with the font available the pictogram is drawn in route.textColor rather than
+   knocked out white on a chip; the chip is the fallback for a font that did not load
+   and for the outlined vagonweb badges, which carry no pictogram. */
+.badge.pict { background:transparent; color:var(--type,#274F96); padding:0; min-width:0;
+              height:auto }
+.badge.pict .mnr { font-size:23px; line-height:1 }
+/* font failed to load: a blank chip in the type colour, deliberately with no text */
+.badge.blank { min-width:26px }
+
+/* How a delay is written, on EVERY surface: a 7 px dot in the bucket's FILL colour
+   drawn as an element and never a glyph, then the number at 700 in --red. No chip,
+   no background. SPEC.md §2, the dot-and-ink rule. */
+.dly { display:inline-flex; align-items:center; gap:5px; flex:none; font-weight:700 }
+.dly::before { content:''; width:7px; height:7px; border-radius:50%; display:block;
+               flex:none; background:var(--dot) }
+
+.plat { font-weight:600; flex:none }
+.plat.green { color:var(--ok) } .plat.black { color:#374151 } .plat.red { color:var(--red) }
+
+/* ============================================================================
+   3. Train marker — design A, fused wedge. Never a CSS transition on the marker
+   root: Leaflet writes that transform. Both animations live on inner elements.
+   ============================================================================ */
+.mk { position:relative; width:52px; height:52px; pointer-events:none }
+.mk svg { display:block; overflow:visible; pointer-events:none }
+.mk .hit { pointer-events:visiblePainted; cursor:pointer }
+.mk .mv  { transition:transform .45s cubic-bezier(.2,.7,.2,1) }
+.mk .mv.nofx { transition:none }
+.mk .rot { transition:transform .45s cubic-bezier(.2,.7,.2,1);
+           transform-origin:26px 26px }
+.mk .halo { opacity:0; transform-origin:26px 26px }
+.mk.sel .halo { animation:mk-pulse 1.5s ease-out infinite }
+@keyframes mk-pulse { 0%{opacity:.55;transform:scale(.55)} 100%{opacity:0;transform:scale(1.6)} }
+/* a train that left the feed with the panel open keeps its last position, greyed */
+.mk.gone { filter:grayscale(1); opacity:.55 }
+
+/* ============================================================================
+   4. Search — design B, docked with the source toggle
+   ============================================================================ */
+.sfield { position:absolute; z-index:600; top:12px; left:50%; transform:translateX(-50%);
+          width:min(420px, calc(100vw - 24px)) }
+.scard { border-radius:12px; overflow:hidden }
+.sinput { width:100%; height:42px; border:none; outline:none; font:15px var(--sans);
+          color:var(--w-ink); background:transparent }
+.sinput::placeholder { color:#98a0b0 }
+.srow { display:flex; align-items:center; gap:9px; padding:0 12px }
+.spills { display:flex; gap:6px; padding:8px 10px 9px; border-top:1px solid var(--w-line) }
+.fchip { font:600 12px/1 var(--sans); padding:6px 10px; border-radius:99px;
+         border:1px solid var(--w-line); background:#fff; color:var(--w-ink-2); cursor:pointer }
+.fchip.on { background:var(--sel-bg); border-color:var(--sel-outline); color:#3730a3 }
+.spop { border-top:1px solid var(--w-line) }
+/* exactly 5 rows visible; the rest scroll. A group heading is not a row. */
+.slist { list-style:none; margin:0; padding:5px; --row:38px;
+         max-height:calc(var(--row) * 5 + 10px); overflow-y:auto; overscroll-behavior:contain }
+.sitem { height:var(--row); display:flex; align-items:center; gap:9px; padding:8px 9px;
+         border-radius:7px; cursor:pointer; font-size:13.5px }
+.sitem[aria-selected="true"] { background:var(--sel-bg);
+         outline:2px solid var(--sel-outline); outline-offset:-2px }
+.sitem .nm { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+             flex:none; max-width:52% }
+.sitem .to { color:var(--w-ink-2); flex:1; min-width:0; display:flex; align-items:center; gap:5px }
+.sitem .to span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.sitem mark { background:var(--mark); color:inherit; border-radius:2px; padding:0 1px }
+.sdelay { margin-left:auto; font:600 11.5px/1 var(--mono); flex:none }
+.sgrp { display:flex; align-items:baseline; gap:8px; padding:9px 9px 3px;
+        font:600 10px/1.4 var(--sans); letter-spacing:.08em; text-transform:uppercase;
+        color:var(--w-ink-2); cursor:default }
+.slist > .sgrp:first-child { padding-top:4px }
+.sgrp .c { margin-left:auto; letter-spacing:0; text-transform:none; font-weight:500; color:#98a0b0 }
+.snote { padding:3px 9px 7px; font:500 11.5px/1.4 var(--sans); color:#98a0b0; cursor:default }
+.sempty { padding:16px 12px; font-size:13px; color:var(--w-ink-2); text-align:center }
+/* a vagonweb row is a timetable record, not a train: outlined badge, no delay column */
+.sitem.vw .badge { background:none; color:var(--w-ink-2);
+                   box-shadow:inset 0 0 0 1px var(--w-line); font-weight:600; min-width:30px }
+.sitem.vw .op { font:600 11px/1 var(--sans); color:#9aa1ae; flex:none }
+.sitem.vw .to { font-size:12.5px }
+.sitem.vw .go { margin-left:auto; flex:none; color:#9aa1ae }
+
+/* ============================================================================
+   5. Hover card — design D. Both middle rows force one family, one size and one
+   22 px line box on every child; mixing a mono time with sans text and a smaller
+   platform label is what threw the row off axis.
+   ============================================================================ */
+.tt { width:330px; font-size:13px; position:absolute; z-index:500; pointer-events:none }
+.tt-hd { display:flex; align-items:center; gap:8px; padding:9px 11px;
+         border-bottom:1px solid var(--w-line) }
+.tt-hd .title { font-weight:700; font-size:13.5px; white-space:nowrap; overflow:hidden;
+                text-overflow:ellipsis; min-width:0 }
+.ttD-row { display:flex; align-items:center; gap:8px; min-width:0 }
+.ttD-row, .ttD-row * { font-size:14.5px; line-height:22px }
+.ttD-row .num { font-family:inherit; font-variant-numeric:tabular-nums }
+.ttD-row .plat { font-size:inherit }
+
+/* ============================================================================
+   6. Detail panel — design C, table rows
+   ============================================================================ */
+.panel { position:absolute; z-index:700; top:0; right:0; bottom:0; width:420px;
+         display:flex; flex-direction:column; overflow:hidden; font-size:15px;
+         background:var(--w); border-left:1px solid var(--w-line);
+         box-shadow:-8px 0 28px rgba(0,0,0,.12); border-radius:0 }
+.p-hd { padding:13px 14px; border-bottom:1px solid var(--w-line); flex:none }
+.p-title { font-weight:700; font-size:17.5px; line-height:1.25 }
+.p-sub { font-size:14px; color:var(--w-ink-2) }
+.p-body { overflow:auto; padding:13px 14px; flex:1 }
+.p-body::-webkit-scrollbar { width:9px }
+.p-body::-webkit-scrollbar-thumb { background:#cfd4dd; border-radius:9px; border:3px solid var(--w) }
+.sec-h { font:600 12.5px/1 var(--sans); letter-spacing:.08em; text-transform:uppercase;
+         color:var(--w-ink-2); margin:18px 0 11px }
+.sec-h:first-child { margin-top:0 }
+
+.alert { display:flex; gap:9px; padding:10px 12px; border-radius:8px; background:var(--red-bg);
+         border:1px solid var(--red-border); color:var(--red); font-size:14px; margin-bottom:7px }
+.info { display:flex; gap:10px; padding:10px 12px; border-radius:8px; background:var(--info-bg);
+        border:1px solid var(--info-border); font-size:14px; margin-bottom:6px }
+.info .mnr { font-size:20px; color:#274F96; line-height:1.15; flex:none; width:21px; text-align:center }
+.info .rng { display:block; color:var(--info-range); font-size:12.5px; margin-top:2px }
+
+/* ---- the rail system: two half-connectors meeting at the dot centre ---- */
+.tl { list-style:none; margin:0; padding:0; --rail:8px }
+.tl li { position:relative }
+.tl li::before, .tl li::after { content:""; position:absolute; left:var(--rail); width:2px;
+                                margin-left:-1px }
+.tl li::before { top:0; height:var(--dc) }
+.tl li::after  { top:var(--dc); bottom:0 }
+.tl li:first-child::before, .tl li:last-child::after { display:none }
+.tl li[hidden] { display:none }   /* grid display beats the UA [hidden] rule */
+.tl li.done::before, .tl li.done::after, .tl li.now::before { background:var(--past) }
+.tl li.now::after, .tl li.todo::before, .tl li.todo::after {
+  background:repeating-linear-gradient(180deg, var(--future) 0 4px, transparent 4px 8px) }
+.tl .dot { position:absolute; left:var(--rail); top:var(--dc); transform:translate(-50%,-50%);
+           border-radius:50%; z-index:2; background:#fff }
+.tl .done .dot { width:9px; height:9px; background:var(--past); box-shadow:0 0 0 3px #fff }
+.tl .todo .dot { width:11px; height:11px; box-shadow:0 0 0 2.5px var(--future), 0 0 0 5px #fff }
+.tl .now  .dot { width:13px; height:13px; box-shadow:0 0 0 4px var(--now), 0 0 0 7px #fff }
+.tl .now  .dot::after { content:""; position:absolute; inset:-4px; border-radius:50%;
+                        border:2px solid var(--now); animation:tl-ring 1.9s ease-out infinite }
+@keyframes tl-ring { 0%{transform:scale(.7);opacity:.55} 100%{transform:scale(2.2);opacity:0} }
+/* past stops keep 100 % opacity: the filled dot and solid rail carry the state */
+.tl .now .stopname { font-weight:800 }
+.stopname { font-weight:600; font-size:16px }
+.old { color:var(--muted); text-decoration:line-through; font-size:13px }
+.new { font-weight:600; font-size:15px }
+.new.late { color:var(--red) } .new.ok { color:var(--ok) }
+.new.sched { color:var(--muted); font-weight:500 }
+.dmin { font-weight:700; font-size:13.5px; line-height:20px; color:var(--red) }
+/* the delay-change marker, at the same 13.5 px and the same 20 px line box as the
+   delay it sits beside; a smaller font in a centred flex row looked a pixel off */
+.grew { display:inline-flex; align-items:center; gap:4px; font-family:var(--sans);
+        font-weight:700; font-size:13.5px; line-height:20px; color:var(--red-dark) }
+.grew.down { color:var(--red-soft) }
+
+/* IN_TRANSIT_TO: the train sits on the rail between two stops, the dash begins at it */
+.tl li.transit { display:block; padding:9px 0 9px 27px; --dc:50% }
+.tl li.transit::before { background:var(--past) }
+.tl li.transit::after { background:repeating-linear-gradient(180deg, var(--future) 0 4px, transparent 4px 8px) }
+.tl .transit .dot { width:13px; height:13px; background:#fff;
+                    box-shadow:0 0 0 4px var(--now), 0 0 0 6px #fff }
+.tl .transit .dot::after { content:""; position:absolute; inset:-4px; border-radius:50%;
+                    border:2px solid var(--now); animation:tl-ring 1.9s ease-out infinite }
+.tl .transit .lab { display:flex; align-items:center; gap:7px; font:700 13.5px/1 var(--sans);
+                    color:var(--now) }
+.tl .transit .lab-sub { font:600 12px/1.3 var(--sans); color:var(--w-ink-2); margin-top:4px;
+                        padding-left:22px }
+
+/* rows that are not stops: full width, no dot, no connector through them */
+.tl li.brk { display:block; padding:10px 2px 10px 27px; color:var(--muted);
+             font:500 14.5px/1.4 var(--sans) }
+.tl li.brk::before, .tl li.brk::after { display:none }
+.tl li.brk b { font-weight:700; color:var(--w-ink-2) }
+.tl .fork-tails { margin-top:8px; display:grid; gap:9px }
+.tl .fork-tail .to { font:600 12px/1.4 var(--sans); letter-spacing:.04em; text-transform:uppercase;
+                     color:var(--w-ink-2) }
+.tl .fork-tail ul { list-style:none; margin:3px 0 0; padding:0 0 0 11px;
+                    border-left:2px solid var(--future) }
+.tl .fork-tail li { display:flex; gap:9px; align-items:baseline; padding:3px 0;
+                    font-size:13.5px; color:var(--w-ink) }
+.tl .fork-tail li .t { font:600 13px/1.4 var(--mono); font-variant-numeric:tabular-nums;
+                       margin-left:auto; color:var(--w-ink-2) }
+
+/* ---- design C's table rows ---- */
+.tl3 { --rail:8px; border-top:1px solid var(--w-line) }
+.tl3 li { display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:11px;
+  padding:11px 2px 11px 27px; --dc:50%;
+  background-image:linear-gradient(to right, transparent 0 20px, var(--w-line) 20px);
+  background-size:100% 1px; background-position:0 100%; background-repeat:no-repeat }
+.tl3 li:last-child { background-image:none }
+.tl3 .sub { display:flex; align-items:center; gap:10px; margin-top:4px; line-height:20px }
+.tl3 .sub > * { line-height:20px }
+.tl3 .cell { text-align:right; font:600 14.5px/1.35 var(--mono);
+             font-variant-numeric:tabular-nums; min-width:52px }
+/* the highlight is its own element, not a background layer: a background gradient
+   cannot have a rounded edge. Its left edge sits at the rail; the bottom 1 px stays
+   clear for the separator. */
+.tl3 .hl { position:absolute; left:9px; right:0; top:0; bottom:1px; z-index:0;
+  pointer-events:none; border-radius:11px 0 0 11px;
+  background:linear-gradient(90deg, rgba(37,99,235,.26), rgba(37,99,235,.09)) }
+.tl3 li > div { position:relative; z-index:1 }
+.tl3-hdr { display:grid; grid-template-columns:1fr auto auto; gap:11px; padding:0 2px 7px 27px;
+  font:600 11px/1 var(--sans); letter-spacing:.08em; color:#9aa1ae }
+.tl3-hdr span:not(:first-child) { min-width:52px; text-align:right }
+.tl3 .plat { font-size:13.5px }
+
+/* ============================================================================
+   6.5 Carriage composition
+   ============================================================================ */
+.cxCard { --cls1:#d9a01f; --cls2:#93a3bb; --clsx:#8b2f4a; --clsd:#2f7d4f; --sc:.6;
+          background:var(--w); color:var(--w-ink); overflow:hidden }
+.cxDock { position:absolute; z-index:650; left:12px; bottom:12px;
+          width:min(560px, calc(100vw - 24px)) }
+.cxHead { display:flex; align-items:center; gap:9px; padding:11px 13px;
+          border-bottom:1px solid var(--w-line) }
+.cxHead .t { font-weight:700; font-size:15px }
+.cxSrc { margin-left:auto; font:500 11.5px/1 var(--mono); color:#9aa1ae; white-space:nowrap }
+.cxSrc a { color:inherit }
+.cxTabs { display:flex; gap:6px; padding:11px 13px 2px; overflow-x:auto;
+          overscroll-behavior-x:contain }
+.cxScroll { scrollbar-width:thin; scrollbar-color:#c3c9d4 transparent }
+.cxScroll::-webkit-scrollbar { height:9px }
+.cxScroll::-webkit-scrollbar-track { background:transparent }
+.cxScroll::-webkit-scrollbar-thumb { background:#c3c9d4; border-radius:9px; border:3px solid var(--w) }
+.cxScroll:hover::-webkit-scrollbar-thumb { background:#a7afbd }
+.cxTab { flex:none; font:600 12.5px/1 var(--sans); padding:8px 11px; border-radius:99px;
+         border:1px solid var(--w-line); background:#fff; color:var(--w-ink-2); cursor:pointer;
+         white-space:nowrap }
+.cxTab.on { background:var(--sel-bg); border-color:var(--sel-outline); color:#3730a3 }
+.cxTab small { font-weight:500; color:#9aa1ae; margin-left:5px }
+.cxTab.on small { color:#5b6fc4 }
+.cxStrip { display:flex; gap:9px; align-items:flex-start; padding:4px 13px 13px;
+           overflow-x:auto; overscroll-behavior-x:contain }
+.cxFront { padding:11px 13px 0; font:600 10px/1 var(--sans); letter-spacing:.07em;
+           text-transform:uppercase; color:#9aa1ae }
+.cxTile { flex:none; width:calc(var(--w,264) * var(--sc) * 1px); position:relative }
+.cxMark { padding:2px; margin:-2px -2px 0; border:1.5px solid transparent; border-radius:6px }
+.cxTile.add .cxMark { border-color:var(--ok); background:#f0fdf4 }
+.cxTile.chg .cxMark { border-color:#b45309; background:var(--amber-bg) }
+.cxBand { height:4px; border-radius:2px; margin-bottom:7px; display:flex; align-items:stretch;
+          gap:1px; overflow:hidden; background:transparent }
+.cxBand i { flex:1; background:var(--band,#e9edf3) }
+.b-c1{background:var(--cls1)} .b-c2{background:var(--cls2)} .b-club{background:var(--clsx)}
+.b-dine{background:var(--clsd)} .b-none{background:var(--w-line)}
+.b-sluz{background:repeating-linear-gradient(45deg,#c3c9d4 0 3px,#e3e6ec 3px 6px)}
+.cxPic { height:calc(58px * var(--sc)); display:flex; align-items:flex-end }
+.cxPic img, .cxPic .cxVeh { display:block; width:100%; height:auto }
+.cxPic .cxVeh { display:none; color:#8d97a8 }
+.cxTile.noimg .cxPic img { display:none }
+.cxTile.noimg .cxPic .cxVeh { display:block }
+.cxTile.miss .cxMark { border-color:var(--red-border); border-style:dashed; background:var(--red-bg) }
+.cxTile.miss .cxPic img { opacity:.4 }
+.cxTile.miss.noimg .cxVeh { color:var(--red); opacity:.75 }
+.cxTile.miss .cxBand { opacity:.35 }
+.cxTile.miss .cxNo b, .cxTile.miss .cxNo .ty, .cxTile.miss .cxSer { color:var(--red) }
+.cxTile.miss .cxSer { font-weight:600 }
+.cxNo { display:flex; align-items:baseline; gap:5px; margin-top:8px; min-width:0 }
+.cxNo b { font:700 13px/1 var(--mono); font-variant-numeric:tabular-nums; flex:none }
+.cxNo b.none { color:#b6bcc8; font-weight:500 }
+.cxNo .op { font:600 11px/1 var(--sans); color:#9aa1ae; flex:none }
+.cxNo span.ty { font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden;
+                text-overflow:ellipsis }
+.cxSer { font:500 11.5px/1.4 var(--mono); color:#9aa1ae; margin-top:2px }
+.cxAm { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin-top:7px;
+        color:#6b7280; min-height:16px }
+.cxAm .n { font:600 11px/16px var(--mono) }
+.cxSeats { margin-top:7px; color:#6b7280 }
+.cxSeats .p { gap:5px; font:700 12.5px/16px var(--mono); font-variant-numeric:tabular-nums }
+.cxNote { font:500 11.5px/1.4 var(--sans); color:#9aa1ae; margin-top:4px }
+.cxAltHd { font:600 10px/1 var(--sans); letter-spacing:.06em; text-transform:uppercase;
+           color:#9aa1ae; margin-top:8px }
+.cxAlt { margin-top:5px; display:grid; gap:4px }
+.cxAlt .a { display:flex; align-items:baseline; flex-wrap:wrap; gap:2px 5px; min-width:0;
+            opacity:.42; transition:opacity .3s }
+.cxAlt .a.on { opacity:1 }
+.cxAlt .cdot { flex:none; align-self:center; width:6px; height:6px; border-radius:50%;
+               background:#c3c9d4; transition:background .3s }
+.cxAlt .a.on .cdot { background:var(--w-ink-2) }
+.cxAlt .op { font:600 11px/1 var(--sans); color:#9aa1ae; flex:none }
+.cxAlt .ty { font:700 12.5px/1 var(--mono); flex:none }
+.cxAlt small { font:500 11px/1.3 var(--sans); color:#9aa1ae; min-width:0 }
+.cxPic .av { display:none } .cxPic .av.on { display:block }
+/* every amenity mark and the seat count carries its own label. The class band is not
+   one of them: 4 px of stripe is too small to aim at. */
+.p { display:flex; align-items:center; border:none; background:none; padding:0; margin:0;
+     color:inherit; font:inherit; cursor:pointer; touch-action:manipulation; position:relative }
+.p .tip { display:none; position:absolute; left:0; top:0; z-index:6; width:max-content;
+     max-width:180px; text-align:left; background:#14161c; color:#fff;
+     font:600 11.5px/1.45 var(--sans); padding:6px 8px; border-radius:6px;
+     box-shadow:0 8px 20px rgba(0,0,0,.28) }
+.p:hover .tip, .p:focus-visible .tip, .p.on .tip { display:block }
+.p:focus { outline:none }
+.p:focus-visible { outline:2px solid var(--now); outline-offset:2px; border-radius:3px }
+.cxDelta { padding:11px 13px 0; font-size:13px; line-height:1.5; color:var(--w-ink-2) }
+.cxDelta b { font-weight:700 }
+.cxDelta .m-add { color:var(--ok) } .cxDelta .m-chg { color:#b45309 }
+.cxDelta .m-miss { color:var(--red) } .cxDelta .same { color:var(--ok); font-weight:600 }
+.cxFoot { padding:9px 13px; border-top:1px solid var(--w-line); font:500 11.5px/1.5 var(--mono);
+          color:#9aa1ae }
+.cxFoot span { display:block }
+.cxState { padding:11px 13px }
+.cxState .t { font-weight:700; font-size:13.5px; margin-bottom:3px }
+.vwCtx { display:flex; align-items:baseline; flex-wrap:wrap; gap:8px; padding:9px 13px;
+         border-bottom:1px solid var(--w-line); background:var(--w-2);
+         font:500 12.5px/18px var(--mono); font-variant-numeric:tabular-nums }
+.vwCtx .rec { font-weight:700; color:var(--w-ink) }
+.vwCtx .nm { font-weight:700; color:#4c566b }
+.vwCtx .yr { margin-left:auto; color:#9aa1ae }
+.vwOff { display:flex; align-items:center; gap:7px; padding:8px 13px; background:#fff7ed;
+         border-bottom:1px solid #fde7c8; color:var(--amber); font:500 12.5px/1.35 var(--sans) }
+.vwSkel { display:flex; align-items:flex-end; gap:9px; padding:14px 13px }
+.vwSkel i { display:block; height:26px; border-radius:3px;
+            background:linear-gradient(90deg,#eef1f5,#e3e8ef,#eef1f5); background-size:200% 100%;
+            animation:vwsh 1.4s linear infinite }
+.vwSkel i.l { height:34px; width:66px }
+@keyframes vwsh { to { background-position:-200% 0 } }
+/* mobile: the train runs down the screen, one vehicle per row, nothing sideways */
+.cxVlist { --sc:1; list-style:none; margin:0; padding:0; border-top:1px solid var(--w-line) }
+.cxVlist li { padding:11px 13px 12px; position:relative;
+  background-image:linear-gradient(to right, transparent 0 13px, var(--w-line) 13px);
+  background-size:100% 1px; background-position:0 100%; background-repeat:no-repeat }
+.cxVlist li:last-child { background-image:none }
+.cxVlist .cxTile { width:100% }
+.cxVlist .cxNo { margin-top:6px; flex-wrap:wrap }
+.cxVlist .cxSer { display:inline; margin-left:6px }
+.cxVlist .cxTop { display:flex; align-items:flex-start; gap:12px }
+.cxVlist .cxLeft { flex:1 1 auto; min-width:0 }
+.cxVlist .cxMark { flex:none; width:calc(var(--w,264) * var(--sc) * 1px); max-width:100% }
+.cxVlist .cxPic { height:auto }
+.cxVbar { position:absolute; left:5px; top:11px; bottom:12px; width:4px; display:flex;
+          flex-direction:column; align-items:stretch; gap:1px }
+.cxVbar i { flex:1; border-radius:2px }
+.cxTile.miss .cxVbar { opacity:.35 }
+.cxVlist .cxAm:empty { display:none; min-height:0 }
+.cxVlist .cxSide { flex:none; width:100px; display:flex; flex-direction:column;
+                   align-items:flex-start; gap:7px }
+.cxVlist .cxSide .cxSeats, .cxVlist .cxSide .cxAm { margin-top:0 }
+.cxVlist .cxSide .cxAm { gap:8px }
+.cxVlist .cxSide .cxSer { display:block; margin-left:0 }
+.cxSheetHd { display:flex; align-items:center; gap:10px; padding:10px 13px;
+             border-bottom:1px solid var(--w-line) }
+.cxSheetHd .ttl { font-weight:700; font-size:15px; line-height:1.2 }
+.cxSheetHd .sub { display:block; font-weight:500; font-size:12px; color:var(--w-ink-2) }
+.cxBack { border:none; background:none; padding:4px; margin-left:-4px; line-height:0;
+          color:var(--w-ink-2); cursor:pointer }
+.cxPager { display:flex; gap:5px; margin-left:auto }
+.cxPager i { width:6px; height:6px; border-radius:50%; background:#d3d8e0 }
+.cxPager i.on { background:var(--w-ink-2) }
+.cxSwipe { display:flex; align-items:center; gap:7px; padding:9px 13px; background:var(--w-2);
+           border-bottom:1px solid var(--w-line); color:var(--w-ink-2); font-size:12.5px }
+.cxLoad { display:flex; align-items:center; gap:9px; padding:14px 13px }
+
+/* ============================================================================
+   10. Error surfaces — one component renders every FeedError
+   ============================================================================ */
+.err-stack { position:absolute; z-index:800; bottom:12px; left:50%; transform:translateX(-50%);
+             display:flex; flex-direction:column; gap:7px; width:min(390px, calc(100vw - 24px)) }
+.err-stack.shifted { left:auto; transform:none; right:12px }
+.card.err { border:1px solid var(--red-border); background:#fff }
+.card.warn { border:1px solid var(--amber-border); background:#fff }
+.card.info-c { border:1px solid #bfdbfe; background:#fff }
+.err-body { padding:10px 12px }
+.err-title { font-size:14px; font-weight:700; flex:1; min-width:0 }
+.card.err .err-title { color:var(--red) }
+.card.warn .err-title { color:var(--amber) }
+.card.info-c .err-title { color:var(--info) }
+.err-tech { display:block; font:500 12px/1.5 var(--mono); color:#6b7280;
+            overflow-wrap:break-word; word-break:normal; margin-top:5px }
+/* even inside a monospace string the hop arrow is an SVG, never "->" */
+.hop { display:inline-block; vertical-align:-2px; margin:0 2px; opacity:.75 }
+.err-meta { display:block; font:500 11.5px/1.5 var(--mono); color:#9aa1ae; margin-top:6px;
+            overflow-wrap:break-word }
+.err-btn { display:inline-flex; align-items:center; gap:6px; font:600 12.5px/1 var(--sans);
+           padding:7px 11px; border-radius:7px; border:1px solid var(--w-line); background:#fff;
+           color:var(--w-ink); cursor:pointer; flex:none }
+.err-btn:hover { background:var(--w-2) }
+.err-more { font:700 12px/1 var(--mono); padding:6px 8px; border-radius:6px;
+            border:1px solid var(--w-line); background:#fff; color:var(--w-ink-2); cursor:pointer;
+            flex:none; font-variant-numeric:tabular-nums }
+.err-more:hover { background:var(--w-2); color:var(--w-ink) }
+/* the inline panel bars: #8b, #11, #13, #13a, #13b, #13c */
+.warnbar { display:flex; gap:9px; align-items:flex-start; padding:10px 12px; border-radius:8px;
+           background:var(--amber-bg); border:1px solid var(--amber-border); color:var(--amber);
+           font-size:13.5px; margin-bottom:9px }
+.warnbar.blue { background:var(--info-bg); border-color:var(--info-border); color:var(--info) }
+/* #10 overlays the map, it does not replace it */
+.err-full { position:absolute; z-index:750; inset:0; display:grid; place-items:center;
+            pointer-events:none; padding:24px }
+.err-full .card { pointer-events:auto; padding:34px 26px; text-align:center; color:var(--w-ink);
+                  max-width:420px }
+.loading-line { position:absolute; z-index:800; bottom:16px; left:50%; transform:translateX(-50%);
+                font:500 12.5px/1 var(--sans); color:var(--w-ink-2); background:rgba(255,255,255,.9);
+                border-radius:99px; padding:7px 13px; box-shadow:0 2px 8px rgba(0,0,0,.1) }
+
+/* ---- map chrome ---------------------------------------------------------- */
+.mapwrap { position:absolute; inset:0 }
+.leaflet-container { width:100%; height:100%; background:#eef1e6; font-family:var(--sans) }
+
+/* the composition is a page of the panel on a phone only: on desktop it is its own card
+   beside the panel, so the pager and the swipe affordance do not exist there */
+.only-narrow { display: none }
+
+@media (max-width: 900px) {
+  .only-narrow { display: flex }
+  .panel { width:100%; border-left:none }
+  .cxDock { display:none }
+  .sfield { width:calc(100vw - 24px) }
+  .err-stack { z-index:900 }
+}
+
+/* Leaflet's own divIcon chrome would draw a white box behind every marker. */
+.leaflet-div-icon.mk-root { background: none; border: none }
