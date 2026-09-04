@@ -18,6 +18,13 @@ import { setSearchCentre } from './Search';
 
 const HUNGARY: L.LatLngBoundsExpression = [[45.7, 16.0], [48.7, 22.9]];
 const GLIDE_MS = 450;
+/** Picking a train zooms IN on it. The zoom is a floor rather than a target, so a fly
+ *  never pulls the map back out from a closer view the user chose themselves. */
+const SELECT_ZOOM = 12;
+const FLY_MS = 800;
+/** The panel covers the right 420 px on desktop, so a fly that will be followed by the
+ *  panel opening aims 210 px right of the train and leaves it centred in what is left. */
+const PANEL_SHIFT = 210;
 
 type MarkerState = {
   marker: L.Marker;
@@ -50,14 +57,19 @@ const shortestArc = (from: number, to: number) => {
 };
 
 export type MapHandle = {
-  flyTo: (trip: NormalisedTrip) => void;
+  flyTo: (trip: NormalisedTrip, willOpenPanel?: boolean) => void;
   recentre: () => void;
 };
 
-export default function MapView({ onHover, onSelect, handleRef, panelOpen, following, onPan }: {
+export default function MapView({ onHover, onSelect, handleRef, cardRef, panelOpen,
+                                  following, onPan }: {
   onHover: (trip: NormalisedTrip | null, point: { x: number; y: number } | null) => void;
   onSelect: (id: string, openPanel: boolean) => void;
   handleRef: React.RefObject<MapHandle | null>;
+  /** The hover card's own element. The card opens through React, but from then on THIS
+   *  component writes its position every frame: the card has to track a marker that is
+   *  gliding and a map that is flying under it, and neither is a React event. */
+  cardRef: React.RefObject<HTMLDivElement | null>;
   panelOpen: boolean;
   following: boolean;
   onPan: () => void;
@@ -70,9 +82,62 @@ export default function MapView({ onHover, onSelect, handleRef, panelOpen, follo
   const drawnFor = useRef<string | null>(null);
   const followingRef = useRef(following);
   const panelOpenRef = useRef(panelOpen);
+  const onHoverRef = useRef(onHover);
+  const hoverIdRef = useRef<string | null>(null);
+  const rafRef = useRef(0);
+  /** Wall-clock deadline of a fly started by a selection. Nothing else may pan the map
+   *  until it passes, or the follow pan and the panel shift abort the fly halfway. */
+  const flyingUntil = useRef(0);
 
   useEffect(() => { followingRef.current = following; }, [following]);
   useEffect(() => { panelOpenRef.current = panelOpen; }, [panelOpen]);
+  useEffect(() => { onHoverRef.current = onHover; }, [onHover]);
+
+  /* ---- the hover card, positioned from the marker's real screen box ------- */
+
+  /** Read where the marker actually IS on screen, which is the inner .mv element: the
+   *  root carries Leaflet's transform and .mv carries our glide, so only .mv's own box
+   *  is where the wedge is being drawn this frame. */
+  function markerPoint(id: string) {
+    const state = markersRef.current.get(id);
+    const host = hostRef.current;
+    if (!state || !host) return null;
+    const r = state.mv.getBoundingClientRect();
+    const h = host.getBoundingClientRect();
+    return { x: r.left + r.width / 2 - h.left, y: r.top + r.height / 2 - h.top };
+  }
+
+  /** Open, move or close the card. Opening goes through React once, for the content;
+   *  every frame after that is a style write on the card's own element, so a poll does
+   *  not re-render 400 markers to move one card. */
+  function trackHover() {
+    rafRef.current = 0;
+    const id = hoverIdRef.current;
+    if (!id) return;
+    const p = markerPoint(id);
+    const el = cardRef.current;
+    if (p && el) {
+      el.style.left = `${p.x}px`;
+      el.style.top = `${p.y}px`;
+    }
+    rafRef.current = requestAnimationFrame(trackHover);
+  }
+
+  function emitHover(id: string | null) {
+    hoverIdRef.current = id;
+    if (!id) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+      onHoverRef.current(null, null);
+      return;
+    }
+    const { byId, frozen } = useStore.getState();
+    const trip = byId.get(id) ?? (frozen?.trip.id === id ? frozen.trip : null);
+    const p = markerPoint(id);
+    if (!trip || !p) { emitHover(null); return; }
+    onHoverRef.current(trip, p);
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(trackHover);
+  }
 
   /* ---- markers: mutate in place, never setIcon() ------------------------- */
 
@@ -170,19 +235,13 @@ export default function MapView({ onHover, onSelect, handleRef, panelOpen, follo
     const el = state.root;
     el.style.touchAction = 'none';
 
-    const trip = () => useStore.getState().byId.get(id) ?? null;
-    const point = () => {
-      const p = map.latLngToContainerPoint(state.marker.getLatLng());
-      return { x: p.x, y: p.y };
-    };
-
     el.addEventListener('mouseenter', () => {
       if (closeTimer) clearTimeout(closeTimer);
-      openTimer = setTimeout(() => onHover(trip(), point()), 60);   // opens after 60 ms
+      openTimer = setTimeout(() => emitHover(id), 60);              // opens after 60 ms
     });
     el.addEventListener('mouseleave', () => {
       if (openTimer) clearTimeout(openTimer);
-      closeTimer = setTimeout(() => onHover(null, null), 120);      // 120 ms grace
+      closeTimer = setTimeout(() => emitHover(null), 120);          // 120 ms grace
     });
     let fromTouch = false;
     el.addEventListener('touchend', () => { fromTouch = true; }, { passive: true });
@@ -192,7 +251,7 @@ export default function MapView({ onHover, onSelect, handleRef, panelOpen, follo
       // selects the marker; the panel is the double tap, so the card anchors above the
       // dot, clear of the second tap.
       onSelect(id, !fromTouch);
-      onHover(trip(), point());
+      emitHover(id);
       fromTouch = false;
     });
     // Leaflet's doubleClickZoom is overridden ONLY when the gesture starts on a marker,
@@ -302,6 +361,7 @@ export default function MapView({ onHover, onSelect, handleRef, panelOpen, follo
     const map = mapRef.current;
     if (!map || !followingRef.current || !panelOpenRef.current) return;
     if (window.innerWidth <= 900) return;         // mobile never follows
+    if (Date.now() < flyingUntil.current) return; // a selection fly owns the map
     const { selectedId, byId } = useStore.getState();
     const trip = selectedId ? byId.get(selectedId) : null;
     // the pan matches the marker glide, so the map and the marker agree
@@ -315,10 +375,11 @@ export default function MapView({ onHover, onSelect, handleRef, panelOpen, follo
 
     // Fixed view framing Hungary. No geolocation, no remembered last view, nothing in
     // localStorage (SPEC 9).
+    // No zoom control: scroll, pinch and double-tap already zoom, and picking a train
+    // zooms for you, so the two buttons were chrome over the map earning nothing.
     const map = L.map(hostRef.current, { zoomControl: false, attributionControl: true })
       .fitBounds(HUNGARY);
     mapRef.current = map;
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -381,7 +442,18 @@ export default function MapView({ onHover, onSelect, handleRef, panelOpen, follo
     syncMarkers(useStore.getState().trains);
 
     handleRef.current = {
-      flyTo: (trip) => map.flyTo([trip.lat, trip.lon], Math.max(map.getZoom(), 11)),
+      // Picking a train zooms in on it. The target is offset by the panel when the panel
+      // is about to open, so the fly lands where the train will be visible rather than
+      // under the panel, and the panBy below stands down for the duration.
+      flyTo: (trip, willOpenPanel = false) => {
+        const zoom = Math.max(map.getZoom(), SELECT_ZOOM);
+        let target = L.latLng(trip.lat, trip.lon);
+        if (willOpenPanel && window.innerWidth > 900) {
+          target = map.unproject(map.project(target, zoom).add([PANEL_SHIFT, 0]), zoom);
+        }
+        flyingUntil.current = Date.now() + FLY_MS;
+        map.flyTo(target, zoom);
+      },
       recentre: () => {
         const t = useStore.getState().selectedId;
         const trip = t ? useStore.getState().byId.get(t) : null;
@@ -392,6 +464,7 @@ export default function MapView({ onHover, onSelect, handleRef, panelOpen, follo
     const markers = markersRef.current;
     return () => {
       unsubscribe();
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
       window.removeEventListener('retry-geometry', onRetryGeometry);
       map.remove();
       mapRef.current = null;
@@ -409,7 +482,10 @@ export default function MapView({ onHover, onSelect, handleRef, panelOpen, follo
     if (!map || wasOpen.current === panelOpen) return;
     wasOpen.current = panelOpen;
     if (window.innerWidth <= 900) return;
-    map.panBy([panelOpen ? 210 : -210, 0], { animate: true });
+    // A selection fly already aimed at the shifted centre, so shifting again here would
+    // both double the offset and abort the fly.
+    if (Date.now() < flyingUntil.current) return;
+    map.panBy([panelOpen ? PANEL_SHIFT : -PANEL_SHIFT, 0], { animate: true });
   }, [panelOpen]);
 
   return <div className="mapwrap" ref={hostRef} aria-label="Live train map" />;

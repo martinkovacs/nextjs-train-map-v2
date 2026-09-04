@@ -36,11 +36,15 @@ parsing.
 ## Architecture
 
 ```
-browser  --30 s poll-->  app/api/vehicles  -->  VPS proxy (pass-through)  -->  MÁV GraphQL
+browser  --30 s poll-->  app/api/vehicles     -->  VPS proxy  POST /           -->  MÁV GraphQL
+browser  --on demand-->  app/api/vw-search    -->  VPS proxy  POST /vagonweb  -->  vagonweb.cz
 ```
 
-The MÁV endpoint needs a Hungarian IP, so every call goes through a VPS proxy that does nothing
-else. The route handler validates, normalises and caches for 30 s, so upstream sees about two
+Every call out of the app goes through a VPS proxy that does nothing else. The MÁV endpoint needs a
+Hungarian IP; vagonweb does not, but it blocks the datacentre ranges this deploys into, so a direct
+fetch from a route handler works locally and returns nothing in production. `POST /` carries the
+GraphQL body, `POST /vagonweb` is a plain GET whose upstream status and body come back untouched;
+that route refuses any host but vagonweb.cz, which is what keeps it from being an open proxy. The route handler validates, normalises and caches for 30 s, so upstream sees about two
 requests a minute regardless of how many tabs are open, and the normalisation (merging legs,
 deduplicating rows, resolving delays, classifying stops) runs once per upstream fetch rather than
 once per client.
@@ -54,9 +58,9 @@ poll re-renders the hover card, panel, search and toast, and not four hundred ma
 | --- | --- | --- |
 | `app/api/vehicles` | MÁV, via the VPS | `s-maxage=30, stale-while-revalidate=30` |
 | `app/api/geometry/[tripId]` | MÁV, via the VPS | `s-maxage=86400` |
-| `app/api/vw-search` | vagonweb `razeni.php` | `s-maxage=86400` |
-| `app/api/composition` | vagonweb `vlak.php` | `s-maxage=86400, stale-while-revalidate=86400` |
-| `app/api/vehicle-image` | vagonweb GIFs | `max-age=2592000` |
+| `app/api/vw-search` | vagonweb `razeni.php`, via the VPS | `s-maxage=86400` |
+| `app/api/composition` | vagonweb `vlak.php`, via the VPS | `s-maxage=86400, stale-while-revalidate=86400` |
+| `app/api/vehicle-image` | vagonweb GIFs, via the VPS | `max-age=2592000` |
 
 Nothing else in the app talks to a third party. Upstream timeout is 10 s everywhere.
 
@@ -79,7 +83,7 @@ map. `.env.local` is never committed.
 
 | Variable | What it is |
 | --- | --- |
-| `PROXY_ENDPOINT` | The VPS proxy. Every MÁV call is a `POST` of `{ url, headers, query }` to it. Rate-limited to 10 requests/min, 100/day, which the 30 s poll behind the 30 s CDN cache fits under. |
+| `PROXY_ENDPOINT` | The VPS proxy's root, which is also its MÁV route: every MÁV call is a `POST` of `{ url, headers, query }` to it, rate-limited to 10/min and 100/day, which the 30 s poll behind the 30 s CDN cache fits under. `/vagonweb` is resolved against this same address for the vagonweb calls and carries its own 60/min, 2000/day budget. |
 | `GRAPHQL_ENDPOINT` | The MÁV OTP2 GraphQL endpoint, sent as the `url` field of that body. |
 | `CF_ACCESS_CLIENT_ID` | Cloudflare Access service token for the proxy. |
 | `CF_ACCESS_CLIENT_SECRET` | The matching secret. Sent to the proxy only, never in the body's `headers`. |

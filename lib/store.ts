@@ -49,7 +49,7 @@ export const useStore = create<State>((set, get) => ({
   selectedId: null,
   frozen: null,
   conditions: {},
-  source: 'current',
+  source: 'both',
 
   setFeed: (res) => {
     const byId = new Map(res.trains.map((t) => [t.id, t]));

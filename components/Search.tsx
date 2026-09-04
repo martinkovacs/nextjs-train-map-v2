@@ -12,7 +12,11 @@ import type { SearchRow } from '@/lib/vagonweb';
 import type { CompositionRecord } from './Composition';
 
 /** Search, design B: docked, with the source toggle. One surface, so the input, the pills
- *  and the list cannot disagree about their edges. It rests on Current.
+ *  and the list cannot disagree about their edges. It rests on Both.
+ *
+ *  At rest it is one 42 px input and nothing else. Focus opens the pills and the results
+ *  together; the clear control closes both and empties the field, which is the only way
+ *  back to rest.
  *
  *  The index is rebuilt each poll from the NORMALISED fields and never from raw upstream
  *  rows. `headsign` and `routeLongName` are indexed but never rendered: the field the UI
@@ -34,6 +38,9 @@ export function Search({ onPick, onOpenRecord }: {
   const source = useStore((s) => s.source);
   const setSource = useStore((s) => s.setSource);
   const [query, setQuery] = useState('');
+  // The field is a plain input until it is clicked into. Focus is what opens the
+  // results and the source pills; the clear control closes both again.
+  const [focused, setFocused] = useState(false);
   // The highlighted row is keyed by the query it belongs to, so a new query starts at
   // the first row without an effect resetting it a render later.
   const [activeRow, setActiveRow] = useState({ q: '', i: 0 });
@@ -165,6 +172,15 @@ export function Search({ onPick, onOpenRecord }: {
       });
     }
     inputRef.current?.blur();
+    setFocused(false);
+  };
+
+  /** The clear control: empties the field AND closes it, so the pills and the results go
+   *  with it. Blurring alone would leave the text behind. */
+  const close = () => {
+    setQuery('');
+    setFocused(false);
+    inputRef.current?.blur();
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -173,7 +189,7 @@ export function Search({ onPick, onOpenRecord }: {
     else if (e.key === 'Home') { e.preventDefault(); setActive(0); }
     else if (e.key === 'End') { e.preventDefault(); setActive(Math.max(options.length - 1, 0)); }
     else if (e.key === 'Enter') { e.preventDefault(); choose(active); }
-    else if (e.key === 'Escape') { setQuery(''); inputRef.current?.blur(); }
+    else if (e.key === 'Escape') { close(); }
   };
 
   useEffect(() => {
@@ -182,6 +198,7 @@ export function Search({ onPick, onOpenRecord }: {
   }, [active, options.length]);
 
   const empty = !options.length && query.trim().length > 0 && !vwLoading;
+  const open = focused;
 
   return (
     <div className="sfield">
@@ -196,25 +213,39 @@ export function Search({ onPick, onOpenRecord }: {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="Train number, name or destination"
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             role="combobox"
-            aria-expanded={options.length > 0}
+            aria-expanded={open && options.length > 0}
             aria-controls="search-list"
             aria-activedescendant={options.length ? `opt-${active}` : undefined}
             aria-autocomplete="list"
             autoComplete="off"
             enterKeyHint="search"
           />
-        </div>
-        <div className="spills">
-          {(['current', 'vagonweb', 'both'] as Source[]).map((s) => (
-            <button key={s} className={`fchip${source === s ? ' on' : ''}`}
-                    onClick={() => setSource(s)}>
-              {s === 'current' ? 'Current' : s === 'vagonweb' ? 'Vagonweb' : 'Both'}
+          {(query || focused) && (
+            // mousedown is swallowed so the blur it would cause cannot unmount this
+            // button before its own click lands
+            <button className="x sclear" aria-label="Clear the search"
+                    onMouseDown={(e) => e.preventDefault()} onClick={close}>
+              <Icon id="i-close" size={17} />
             </button>
-          ))}
+          )}
         </div>
 
-        <div className="spop">
+        {open && (
+          <div className="spills">
+            {(['both', 'current', 'vagonweb'] as Source[]).map((s) => (
+              <button key={s} className={`fchip${source === s ? ' on' : ''}`}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => setSource(s)}>
+                {s === 'both' ? 'Both' : s === 'current' ? 'Map' : 'Vagonweb'}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="spop" hidden={!open}>
           <ul className="slist" id="search-list" role="listbox" ref={listRef}>
             {showLive && source === 'both' && live.length > 0 && (
               <li className="sgrp" role="presentation">On the map now</li>
@@ -241,6 +272,7 @@ export function Search({ onPick, onOpenRecord }: {
               <li className="snote" role="presentation">
                 <span style={{ color: 'var(--amber)' }}>vagonweb search failed. {vwError}.</span>{' '}
                 <button className="err-btn" style={{ marginLeft: 6 }}
+                        onMouseDown={(e) => e.preventDefault()}
                         onClick={() => {
                           cache.current.delete(fold(query.trim()));
                           setVwAttempt((n) => n + 1);
@@ -269,7 +301,7 @@ export function Search({ onPick, onOpenRecord }: {
                   ? 'Only trains on the map are searchable. Switch to Vagonweb for the timetable.'
                   : source === 'vagonweb'
                     ? `No MÁV, GySEV, ÖBB or RegioJet train matches that in the ${vwYear()} `
-                      + 'timetable. Switch to Current for trains on the map.'
+                      + 'timetable. Switch to Map for trains on the map.'
                     : 'Not on the map, and vagonweb has no MÁV, GySEV, ÖBB or RegioJet train '
                       + 'with that number either.'}
               </li>

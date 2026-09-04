@@ -1,5 +1,6 @@
 'use client';
 
+import { useLayoutEffect } from 'react';
 import { Icon } from './Sprite';
 import { RouteBadge } from './Badge';
 import { Delay } from './Delay';
@@ -11,9 +12,18 @@ import type { NormalisedTrip } from '@/lib/types';
  *  Both middle rows are .ttD-row, which forces one font family, one size (14.5 px) and
  *  one 22 px line box on EVERY child. Mixing a monospace time with sans text and a
  *  smaller platform label is what threw the row off axis; do not reintroduce either. */
-export function HoverCard({ trip, point }: {
+export function HoverCard({ trip, point, ref }: {
   trip: NormalisedTrip; point: { x: number; y: number };
+  ref: React.RefObject<HTMLDivElement | null>;
 }) {
+  // The position is written to the DOM rather than rendered, because MapView keeps
+  // writing it every frame afterwards to follow the marker. An inline left/top would be
+  // reapplied on the next poll's re-render and snap the card back to where it opened.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el) { el.style.left = `${point.x}px`; el.style.top = `${point.y}px`; }
+  }, [ref, point]);
+
   const stop = trip.nextStop ? trip.stoptimes.find((s) => s.name === trip.nextStop) : null;
   const terminus = trip.stoptimes[trip.stoptimes.length - 1];
   const speed = kmh(trip.speed);
@@ -31,8 +41,9 @@ export function HoverCard({ trip, point }: {
 
   return (
     <div
+      ref={ref}
       className="card tt"
-      style={{ left: point.x, top: point.y, transform: 'translate(-50%, calc(-100% - 22px))' }}
+      style={{ transform: 'translate(-50%, calc(-100% - 22px))' }}
     >
       <div className="tt-hd" style={{ ['--type' as string]: trip.typeColor } as React.CSSProperties}>
         <RouteBadge fontCode={trip.fontCode} typeColor={trip.typeColor} />

@@ -89,9 +89,17 @@ Five route handlers and four env vars. Nothing else talks to a third party.
 | --- | --- | --- |
 | `app/api/vehicles` | MÁV, via the VPS | `s-maxage=30, stale-while-revalidate=30` |
 | `app/api/geometry/[tripId]` | MÁV, via the VPS | `s-maxage=86400`; a shape does not change while the trip runs, so it is fetched once per selected train and held |
-| `app/api/vw-search` | vagonweb `razeni.php` | `s-maxage=86400` **and** a client session cache keyed by the folded query (§4.1) |
-| `app/api/composition` | vagonweb `vlak.php` | `s-maxage=86400, stale-while-revalidate=86400` (§6.5) |
-| `app/api/vehicle-image` | vagonweb GIFs | `max-age=2592000`, 30 days (§6.5) |
+| `app/api/vw-search` | vagonweb `razeni.php`, via the VPS | `s-maxage=86400` **and** a client session cache keyed by the folded query (§4.1) |
+| `app/api/composition` | vagonweb `vlak.php`, via the VPS | `s-maxage=86400, stale-while-revalidate=86400` (§6.5) |
+| `app/api/vehicle-image` | vagonweb GIFs, via the VPS | `max-age=2592000`, 30 days (§6.5) |
+
+**Every call out of this app leaves through the VPS, both upstreams.** MÁV needs the Hungarian IP.
+vagonweb does not, but it rate-limits and blocks the datacentre ranges the app deploys into, so a
+direct fetch from a route handler works locally and returns nothing in production. One hop for
+everything also means one address to name in an error message.
+
+**No zoom control on the map.** Scroll, pinch and double-tap on empty map already zoom, and §8's
+selection fly zooms for you; two buttons floating over the map earn nothing against that.
 
 - **Geometry goes through the VPS too** — same MÁV endpoint, same Hungarian IP; a separate route
   only to carry a different cache lifetime. Query is
@@ -150,10 +158,20 @@ Five route handlers and four env vars. Nothing else talks to a third party.
   vagonweb gets the same 10 s.
 - **Four env vars, all in `.env.local`, never committed, and all four required** — a missing one
   is §10 #2, the same failure as any other unusable configuration:
-  - **`PROXY_ENDPOINT`** — the VPS proxy. Every MÁV call is a `POST` to it with the JSON body
-    `{ url, headers, query }`; it POSTs `{query}` to `url` with `headers` attached and returns the
-    answer unchanged. It rate-limits at 10 requests a minute and 100 a day, which the 30 s poll
-    behind a 30 s CDN cache (~2/min) fits under; a 429 arrives as `{"error": "Rate Limit Error"}`.
+  - **`PROXY_ENDPOINT`** — the VPS proxy, which answers **two** routes:
+    - **`POST /`**, the address in the variable, is the MÁV call: body `{ url, headers, query }`, it
+      POSTs `{query}` to `url` with `headers` attached and returns the answer unchanged. Rate-limited
+      at 10 a minute and 100 a day, which the 30 s poll behind a 30 s CDN cache (~2/min) fits under.
+    - **`POST /vagonweb`**, resolved against that same address rather than configured separately,
+      is a plain `GET`: body `{ url, headers }`, and it hands back the upstream's **status and body
+      untouched**, so a caller can keep treating the answer as if it had fetched the page itself.
+      This is how all three vagonweb routes leave. **The name is the guard** — the proxy refuses any
+      host but `vagonweb.cz` on it, so a route that GETs an arbitrary URL and returns the bytes
+      cannot become an open proxy. It carries its own, much larger budget — 60 a minute and 2000 a
+      day — because a vagonweb search fires on a typing burst and a composition fetches one drawing
+      per vehicle, where the MÁV poll is two requests a minute forever. Only the proxy's **own**
+      failures arrive as a `502` or `504` with a JSON body.
+    A 429 from either arrives as `{"error": "Rate Limit Error"}`.
   - **`GRAPHQL_ENDPOINT`** — the MÁV endpoint, sent as the `url` field of that body rather than
     being part of the address the app calls.
   - **`CF_ACCESS_CLIENT_ID`** / **`CF_ACCESS_CLIENT_SECRET`** — the Cloudflare Access service token
@@ -515,6 +533,14 @@ One card, `border-radius:12px`, floating over the map: a 42 px input row with a 
 `#7a8496`, then a row of three pills on a `1px var(--w-line)` top border, then the results on
 another one. **One surface**, so the input, pills and list cannot disagree about their edges.
 
+**At rest it is the input row and nothing else.** The pills and the results appear when the field
+takes focus and go again when it loses it, so the card is a 42 px strip over the map until it is
+asked for. The input row carries a **clear control** on its right, a 32 px square with the 17 px
+`i-close`, present whenever the field holds text or has focus: pressing it empties the field, blurs
+it and closes the pills and the results in one action, which is the only way back to rest without
+picking a result. It swallows `mousedown` so the blur it would otherwise cause cannot unmount it
+before its own click lands; the pills and the popup's Retry do the same.
+
 **Where it sits.** Desktop **top-centre**, floating clear of the map's top edge, results dropping
 beneath. Mobile: **full screen width minus a margin, capped at 400 px**, at the top, so the input, the three pills
 and the result rows all have room on a narrow phone — still a floating card with its own corners
@@ -526,9 +552,10 @@ composition card bottom-left (§6.5), the error toast bottom-centre (§10). Only
 collide, on a narrow desktop window: when they would overlap, **the toast shifts right of the
 composition card**. Neither ever moves the other, and neither may cover the detail panel.
 
-**Two sources, and the pills say which is being searched:** **Current** (the map), **Vagonweb**
-(the timetable) and **Both**. It **rests on Current**. §4.1 is the second source; everything here
-is the first unless it says otherwise.
+**Two sources, and the pills say which is being searched:** in pill order, **Both**, **Map** (the
+trains on screen) and **Vagonweb** (the timetable). It **rests on Both**, so the field answers with
+everything it can before being told where to look. §4.1 is the second source; everything here is
+the first unless it says otherwise.
 
 **The pills:** `font: 600 12px/1 var(--sans)`, `padding: 6px 10px`, `border-radius: 99px`, `1px
 var(--w-line)` border on `#fff`, `var(--w-ink-2)` label. Lit: `background:#eef2ff`,
@@ -611,7 +638,7 @@ needs no `Referer`**, unlike `vlak.php`, which is what makes it usable behind a 
 
 | Concern | Rule |
 | --- | --- |
-| When it fires | Debounced **400 ms**, minimum **2 characters**, one request in flight with the previous aborted, answers cached for the session under the folded query **and for 24 h on the CDN**, though the request itself carries the query **as typed** (§1). Two caches catch different things: the session cache stops one person's backspacing re-asking, the CDN cache stops a query anyone has run reaching vagonweb at all. This is timetable data and it is a volunteer site. The local list draws immediately and never waits for it. Nothing is requested while **Current** is lit. |
+| When it fires | Debounced **400 ms**, minimum **2 characters**, one request in flight with the previous aborted, answers cached for the session under the folded query **and for 24 h on the CDN**, though the request itself carries the query **as typed** (§1). Two caches catch different things: the session cache stops one person's backspacing re-asking, the CDN cache stops a query anyone has run reaching vagonweb at all. This is timetable data and it is a volunteer site. The local list draws immediately and never waits for it. Nothing is requested while **Map** is lit. |
 | What it matches | vagonweb matches `jmeno` against **the number and the train name only**. Not the route, not the operator. Number matching is a substring. |
 | Operator filter | Keep **MÁV, GySEV, ÖBB and RegioJet**, the last under **both** codes it files with, **`RJ` and `RJSK`** (the Slovak arm). Drop everything else **silently**: a dropped row is not a result and is not counted at the user. Compare `zeme` through the same `fold()`, so `ÖBB` and `obb` are one operator. |
 | Volume | Draw at most **6** rows and count the rest **of ours** (*"18 more on vagonweb."*). Fetch **page 1 only**, never `&s=2`. |
@@ -636,9 +663,9 @@ composition. Never deduplicate them.
   cross the boundary without noticing. The headings are not options.
 - When nothing on the map matches but vagonweb has rows, say so above them: *Not on the map. These
   are timetable records, and they open a composition.*
-- **The empty state names the pill that would have answered.** On **Current**: *Only trains on the
+- **The empty state names the pill that would have answered.** On **Map**: *Only trains on the
   map are searchable. Switch to Vagonweb for the timetable.* On **Vagonweb**: *No MÁV, GySEV, ÖBB
-  or RegioJet train matches that in the 2026 timetable. Switch to Current for trains on the map.*
+  or RegioJet train matches that in the 2026 timetable. Switch to Map for trains on the map.*
   On **Both**: *Not on the map, and vagonweb has no MÁV, GySEV, ÖBB or RegioJet train with that
   number either.* A match on one source is never a no-match, and the Vagonweb pill never claims
   anything about the map, which it did not search.
@@ -712,6 +739,14 @@ Do not reintroduce a monospace family or a distinct platform size in these rows.
 - **Alerts:** one row each, warning icon + text truncated with an ellipsis, full string in `title`.
   Card height varies with the alert count, so the anchor must be measured.
 - **Desktop:** opens after 60 ms hover, closes after 120 ms grace. `pointer-events:none`.
+- **It follows its train.** The card opens through React once, for its content, and from then on
+  the map component writes its `left`/`top` every frame from the marker's real screen box, which is
+  the inner `.mv` element rather than the marker root: the root carries Leaflet's transform and
+  `.mv` carries the 450 ms glide, so only `.mv` is where the wedge is actually being drawn this
+  frame. That is what keeps the card on the train while it glides, while the map flies to a
+  selection and while the panel shifts the view. **The position must not be an inline style on the
+  rendered element**, or the next poll's re-render reapplies the point the card opened at and snaps
+  it back.
 - **Mobile:** single tap opens it and selects the marker; tap elsewhere closes. Double tap opens
   the panel (§9 suppresses Leaflet's double-tap zoom for marker targets only), so the card anchors
   **above** the dot, clear of the second tap.
@@ -732,7 +767,8 @@ Do not reintroduce a monospace family or a distinct platform size in these rows.
 
 Width **420 px** desktop (confirmed), base font 15 px, max-height the viewport. Right-docked, full
 height, map pans left so the train stays visible. Mobile: full-height overlay with a close button
-(§9 — no drag-to-dismiss in v1).
+(§9 — no drag-to-dismiss in v1). **On a phone the close button is a 44 px touch target** carrying
+the 24 px `i-close`: the panel is the whole screen there and this is the only way out of it.
 
 ### Contents, in order
 
@@ -744,7 +780,11 @@ height, map pans left so the train stays visible. Mobile: full-height overlay wi
    physical train (§7.1, §8). When the delay is carried forward it gets one more line, `+53 min at
    Hegyeshalom` (§7.2).
 2. **Alerts** — every currently-effective alert, no tabs.
-3. **Info services** — every service, sorted by `order`, no tabs.
+3. **Info services** — sorted per §7.3, **the first four shown and the rest behind one control**,
+   no tabs. A train can file twenty-one of them, each a full sentence, and unfolded they push the
+   route itself off the bottom of the panel. The control reads `Show N more services` and toggles
+   to `Fewer services`; it is keyed by the train it was expanded for, so changing train collapses
+   it again.
 4. **`Route`** heading, then the column header `STOP · ARR · DEP`, then the table.
 
 **No tabs over the trip's own data.** Nothing the feed says about this train is a click away.
@@ -764,7 +804,11 @@ its per-day tabs do not breach this.
   grew marker is set at the same 13.5 px as the delay — a smaller font in a centred flex row is
   what kept it looking a pixel off.
 - **ARR / DEP cells:** monospace tabular, 14.5 px, min-width 52 px. Scheduled struck through above
-  the realtime value when they differ.
+  the realtime value when they differ. **Each cell is coloured by its own delay** — the ARR cell by
+  `arrivalDelay`, the DEP cell by `departureDelay`, red at 60 s or more and green below. A train
+  that arrives late and then stands in the platform until its booked departure has caught up by the
+  time it leaves, and the row has to say so: reading `arrivalDelay` for both cells paints that
+  departure red and claims a delay the train no longer has.
 - **Row separator** is a background layer, not a `border-bottom`, so it stops clear of the rail
   instead of crossing it. `:last-child` drops it.
   ```css
@@ -1375,7 +1419,7 @@ estimated batch, the speed slot and transit row label are **empty**, not `0 km/h
 | `stopPosition` gaps | `1,2,…,6,8,…` — stops this trip does not call at. Render nothing, no placeholders. |
 | `platformColor` | `green` = confirmed live by the station system, render `#15803d`. `black` = timetable value, neutral. `red` = **platform changed from the timetable**, render `--red`; normal, not an edge case. Never use the API string as a CSS colour. **A null `platformCode` renders nothing at all, whatever the colour** — `green` with a null code is common, and a confirmation with no value to confirm is not something to show. |
 | `realtimeState` | `MODIFIED`/`UPDATED`: show realtime. `SCHEDULED`: one grey time, no strike-through, and **no usable delay on that stop** (§7.2). |
-| Info services | **Render only `displayable: true`**, then sort by `order`. (Every service in every capture is `true`; the filter is for the day one is not.) **One row per `name` + `fontCode`, carrying every distinct stop range it was filed under**, each a `fromStop.name` to `tillStop.name` sub-line, the sub-line hidden when a single range spans the whole trip. The same service is legitimately filed several times over different stretches — `351 DRÁVA` carries *Csatlakozásra nem vár* five times at five stations, and a merged trip adds one filing per leg — and five identical rows differing only in a range read as a rendering bug. **Nothing else is ever merged:** differing name or `fontCode` means two rows, whatever the ranges. **The collapsed row sorts on the lowest `order` of its filings**, since a merged trip's legs need not agree: the lowest keeps the row where MÁV put it at its highest and stops the list reshuffling as a leg loses its realtime. |
+| Info services | **Render only `displayable: true`**, then sort by `order`. (Every service in every capture is `true`; the filter is for the day one is not.) **One row per `name` + `fontCode`, carrying every distinct stop range it was filed under**, each a `fromStop.name` to `tillStop.name` sub-line, the sub-line hidden when a single range spans the whole trip. The same service is legitimately filed several times over different stretches — `351 DRÁVA` carries *Csatlakozásra nem vár* five times at five stations, and a merged trip adds one filing per leg — and five identical rows differing only in a range read as a rendering bug. **Nothing else is ever merged:** differing name or `fontCode` means two rows, whatever the ranges. **The collapsed row sorts on the lowest `order` of its filings**, since a merged trip's legs need not agree: the lowest keeps the row where MÁV put it at its highest and stops the list reshuffling as a leg loses its realtime. **Orders 16, 18, 19 and 23 sort above everything else**, keeping `order` among themselves; everything else keeps the feed's order below them. Those four are the seat-reservation filings — reservable, compulsory, compulsory domestically and optional internationally, and usable without one on the marked section — and they are the only ones that answer the question the panel is open for, which is whether you can get on this train and where you sit. With the list collapsed to four rows (§6) they are also what is left visible. |
 | Alerts | Only those currently in effect, filtered on `effectiveStartDate`/`effectiveEndDate` against now, which does real work: expired alerts are present on most polls. Render **`alertDescriptionText`**; `alertHeaderText` is empty and `alertUrl` null throughout, so no header fallback and no URL affordance. |
 | Headline delay | The trip's **resolved delay**, §7.2. Based on the next stop, which is what a waiting passenger cares about, but never read straight off `arrivalDelay`. |
 | `stopRelationship` | Null means the trip is not running. Never a data error, never a reason to hide a train on its own. §7.1. |
@@ -1419,6 +1463,15 @@ estimated batch, the speed slot and transit row label are **empty**, not `0 km/h
 - **When the open train disappears** from the feed (trip ended, left the bbox, dropped): **freeze**
   the panel, grey the last known marker position, show a last-seen time. Do not silently close.
   Which message depends on why: §10 #13, #13a, #13b, #13c.
+- **Picking a train zooms in on it**, whether it was picked from a marker, a search result or a
+  `?train=` link. The three paths are one call, `flyTo`, and it is the only thing that may move the
+  map for a selection: a **floor** of z12, never a target, so a fly never pulls the map back out
+  from a closer view the user chose themselves. When the fly is going to be followed by the panel
+  opening it aims **210 px right** of the train and leaves it centred in the strip the panel does
+  not cover; on a phone there is no offset, because the panel is the whole screen.
+- **Nothing else may pan the map while that fly is running.** Both the follow pan and the panel's
+  own 210 px shift stand down for the fly's 800 ms, because either one aborts a fly halfway and
+  leaves the map between the two positions.
 - **Follow the train:** desktop only, and only while the panel is open. Mobile never follows. A
   manual pan **pauses** following and surfaces a re-centre control in the panel header — a map that
   fights your drag is worse than one that stops following.

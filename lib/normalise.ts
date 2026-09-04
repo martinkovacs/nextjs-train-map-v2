@@ -202,6 +202,13 @@ function unionAlerts(legs: Leg[], now: number): Alert[] {
   return out;
 }
 
+/** Four filings answer the question the panel is actually open for, "can I get on this
+ *  train and where do I sit", so they sort above everything else whatever their own
+ *  order: seat reservation compulsory (18), reservable (16), compulsory domestically and
+ *  optional internationally (19), and usable without a seat reservation on the marked
+ *  section (23). Everything else keeps the feed's own order below them (7.3). */
+const PROMOTED_INFO_ORDERS = new Set([16, 18, 19, 23]);
+
 function unionInfoServices(legs: Leg[]): InfoService[] {
   // One row per name + fontCode, carrying every distinct stop range it was filed under.
   // Nothing else is ever merged: differing name or fontCode means two rows, whatever the
@@ -229,7 +236,8 @@ function unionInfoServices(legs: Leg[]): InfoService[] {
       }
     }
   }
-  return [...byKey.values()].sort((a, b) => a.order - b.order);
+  const rank = (s: InfoService) => (PROMOTED_INFO_ORDERS.has(s.order) ? 0 : 1);
+  return [...byKey.values()].sort((a, b) => rank(a) - rank(b) || a.order - b.order);
 }
 
 /* ---- delay resolution (7.2) ---------------------------------------------- */

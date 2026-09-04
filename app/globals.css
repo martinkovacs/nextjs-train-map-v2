@@ -135,6 +135,11 @@ body {
           color:var(--w-ink); background:transparent }
 .sinput::placeholder { color:#98a0b0 }
 .srow { display:flex; align-items:center; gap:9px; padding:0 12px }
+/* clears the field and closes the whole surface; 32 px square, so it is a touch target
+   on a phone without making the 42 px row taller */
+.sclear { width:32px; height:32px; display:flex; align-items:center; justify-content:center;
+          border-radius:99px; margin-right:-6px }
+.sclear:hover { background:var(--w-2); color:var(--w-ink-2) }
 .spills { display:flex; gap:6px; padding:8px 10px 9px; border-top:1px solid var(--w-line) }
 .fchip { font:600 12px/1 var(--sans); padding:6px 10px; border-radius:99px;
          border:1px solid var(--w-line); background:#fff; color:var(--w-ink-2); cursor:pointer }
@@ -205,6 +210,8 @@ body {
         border:1px solid var(--info-border); font-size:14px; margin-bottom:6px }
 .info .mnr { font-size:20px; color:#274F96; line-height:1.15; flex:none; width:21px; text-align:center }
 .info .rng { display:block; color:var(--info-range); font-size:12.5px; margin-top:2px }
+/* the control that reveals the services beyond the first four (SPEC.md 7.3) */
+.info-more { margin:1px 0 7px }
 
 /* ---- the rail system: two half-connectors meeting at the dot centre ---- */
 .tl { list-style:none; margin:0; padding:0; --rail:8px }
@@ -490,6 +497,10 @@ body {
 @media (max-width: 900px) {
   .only-narrow { display: flex }
   .panel { width:100%; border-left:none }
+  /* the panel is the whole screen on a phone and the close button is the only way out
+     of it, so it gets a 44 px touch target rather than the desktop 26 px one */
+  .x-lg { padding:10px; margin:-8px -8px 0 0 }
+  .x-lg .ic { width:24px; height:24px }
   .cxDock { display:none }
   .sfield { width:calc(100vw - 24px) }
   .err-stack { z-index:900 }

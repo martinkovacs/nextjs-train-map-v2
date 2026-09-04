@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
+import { proxyGet } from '@/lib/proxy';
 import { keptOperator, parseSearchRows, searchUrl, VW_HEADERS, VW_TIMEOUT_MS } from '@/lib/vagonweb';
 
 /**
  * The second source in the search field. razeni.php needs NO Referer, unlike vlak.php,
  * which is what makes it usable behind a search field at all. The Czech HTML is parsed
  * here and never reaches the browser.
+ *
+ * The request itself goes through the VPS proxy, like every other call out of this app:
+ * vagonweb blocks the datacentre ranges this deploys into. `where` still names
+ * razeni.php, because that is the hop that failed as far as anyone reading it cares.
  *
  * Page 1 only, never `&s=2`: `jmeno=1` returns 150 rows on page 1 and offers six pages,
  * which is far more than any result list should draw. The query goes upstream AS TYPED
@@ -20,7 +25,7 @@ export async function GET(request: Request) {
   const url = searchUrl(rok, jmeno);
   let res: Response;
   try {
-    res = await fetch(url, { headers: VW_HEADERS, signal: AbortSignal.timeout(VW_TIMEOUT_MS) });
+    res = await proxyGet(url, VW_HEADERS, VW_TIMEOUT_MS);
   } catch (e) {
     const err = e as Error;
     const detail = err.name === 'TimeoutError' || err.name === 'AbortError'

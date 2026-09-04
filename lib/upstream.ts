@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { missingEnv, proxyHeaders, PROXY_VARS } from './proxy';
 
 /** The MÁV side of the app. Both queries are in api.md verbatim; both go through the
  *  VPS, which needs a Hungarian IP and does nothing else, so it is one hop. */
@@ -93,18 +94,7 @@ type UpstreamResult =
 export async function postUpstream(query: string): Promise<UpstreamResult> {
   const proxy = process.env.PROXY_ENDPOINT;
   const endpoint = process.env.GRAPHQL_ENDPOINT;
-  const cfId = process.env.CF_ACCESS_CLIENT_ID;
-  const cfSecret = process.env.CF_ACCESS_CLIENT_SECRET;
-  const missing = (
-    [
-      ['PROXY_ENDPOINT', proxy],
-      ['GRAPHQL_ENDPOINT', endpoint],
-      ['CF_ACCESS_CLIENT_ID', cfId],
-      ['CF_ACCESS_CLIENT_SECRET', cfSecret],
-    ] as const
-  )
-    .filter(([, v]) => !v)
-    .map(([name]) => name);
+  const missing = missingEnv([...PROXY_VARS, 'GRAPHQL_ENDPOINT']);
   if (missing.length) {
     return {
       kind: 'no-env' as const,
@@ -115,12 +105,7 @@ export async function postUpstream(query: string): Promise<UpstreamResult> {
   try {
     const res = await fetch(proxy!, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'vonatinfo/1.0',
-        'CF-Access-Client-Id': cfId!,
-        'CF-Access-Client-Secret': cfSecret!,
-      },
+      headers: proxyHeaders(),
       body: JSON.stringify({
         url: endpoint,
         headers: { 'User-Agent': 'vonatinfo/1.0' },

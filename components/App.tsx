@@ -29,6 +29,9 @@ export function App() {
   const clear = useStore((s) => s.clear);
 
   const mapRef = useRef<MapHandle | null>(null);
+  // The card opens through React and is then positioned by MapView every frame, so it
+  // stays on its train while the marker glides and the map flies (SPEC 3).
+  const cardRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ trip: NormalisedTrip; point: { x: number; y: number } } | null>(null);
   const [followPaused, setFollowPaused] = useState(false);
   const [cardOpen, setCardOpen] = useState(true);
@@ -87,7 +90,7 @@ export function App() {
       wanted.current = null;
       setPanelWanted(true);
       select(hit.id);
-      mapRef.current?.flyTo(hit);
+      mapRef.current?.flyTo(hit, true);
     } else if (!useStore.getState().conditions['#17']) {
       // The one toast that is not a live condition, so it is also the one that can be
       // cleared. The parameter stays in the URL, so the link still explains itself.
@@ -116,7 +119,7 @@ export function App() {
     setCardOpen(true);
     setFollowPaused(false);
     select(t.id);
-    mapRef.current?.flyTo(t);
+    mapRef.current?.flyTo(t, true);
   }, [clear, select]);
 
   const close = useCallback(() => {
@@ -132,6 +135,9 @@ export function App() {
     setFollowPaused(false);
     setPanelWanted(openPanel);
     select(id);
+    // Clicking a train zooms in on it, exactly as picking one from the search does.
+    const hit = useStore.getState().byId.get(id);
+    if (hit) mapRef.current?.flyTo(hit, openPanel);
   }, [clear, select]);
 
   const panelOpen = !!trip && panelWanted;
@@ -146,6 +152,7 @@ export function App() {
         onHover={(t, point) => setHover(t && point ? { trip: t, point } : null)}
         onSelect={onMapSelect}
         handleRef={mapRef}
+        cardRef={cardRef}
         panelOpen={panelOpen}
         following={!followPaused}
         onPan={() => setFollowPaused(true)}
@@ -153,7 +160,7 @@ export function App() {
 
       <Search onPick={pick} onOpenRecord={(r) => { setRecord(r); clear('#17'); }} />
 
-      {hover && <HoverCard trip={hover.trip} point={hover.point} />}
+      {hover && <HoverCard ref={cardRef} trip={hover.trip} point={hover.point} />}
 
       {trip && panelWanted && (
         <DetailPanel trip={trip} onClose={close} followPaused={followPaused}

@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 import { fold } from './fold';
+import { proxyGet } from './proxy';
 import { yearInBudapest } from './time';
 import { VW_CATEGORY } from './categories';
 
@@ -21,7 +22,10 @@ export type TrainKey = {
 /** vlak.php only renders the composition when a Referer arrives, and does not care which
  *  one (any value but Google's works). So: a constant, no configuration, and this app's
  *  own URL stays out of someone else's logs. The User-Agent carries the honest
- *  identification, without a URL. */
+ *  identification, without a URL.
+ *
+ *  These travel in the proxy request's BODY, since that is what vagonweb sees. The
+ *  CF-Access pair is ours to the proxy and never joins them (lib/proxy.ts). */
 export const VW_HEADERS = {
   Referer: 'https://www.vagonweb.cz/',
   'User-Agent': 'vonatinfo/1.0',
@@ -139,8 +143,12 @@ export type Fetched =
   | { ok: true; found: false; url: string }
   | { ok: false; url: string; status?: number; reason: string; where: string };
 
-const get = async (url: string) =>
-  fetch(url, { headers: VW_HEADERS, signal: AbortSignal.timeout(VW_TIMEOUT_MS) });
+/** Every vagonweb call leaves through the VPS proxy, the same hop MÁV is reached over:
+ *  vagonweb rate-limits and blocks the datacentre ranges this app deploys into, so a
+ *  direct fetch from the route handler works locally and returns nothing in production.
+ *  The proxy hands back vagonweb's own status and body, so everything below is unchanged
+ *  by the extra hop. */
+const get = async (url: string) => proxyGet(url, VW_HEADERS, VW_TIMEOUT_MS);
 
 /** Direct first, ALWAYS. The search page is the recovery for the direct URL's one
  *  failure mode, a category vagonweb filed the train under differently, and it must

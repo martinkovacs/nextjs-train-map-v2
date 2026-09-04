@@ -84,7 +84,7 @@ export function DetailPanel({ trip, onClose, onRecentre, followPaused }: {
               <Icon id="i-locate" />
             </button>
           )}
-          <button className="x" onClick={onClose} aria-label="Close">
+          <button className="x x-lg" onClick={onClose} aria-label="Close">
             <Icon id="i-close" />
           </button>
         </div>
@@ -118,21 +118,7 @@ export function DetailPanel({ trip, onClose, onRecentre, followPaused }: {
               </div>
             ))}
 
-            {trip.infoServices.map((s, i) => (
-              <div className="info" key={`${s.name}-${s.fontCode}-${i}`}>
-                <InfoPictogram fontCode={s.fontCode} />
-                <div>
-                  {s.name}
-                  {/* the sub-line is hidden when a single range spans the whole trip */}
-                  {!(s.ranges.length === 1
-                     && s.ranges[0].from === trip.origin
-                     && s.ranges[0].till === trip.destination)
-                    && s.ranges.map((r, j) => (
-                      <span className="rng" key={j}>{r.from} – {r.till}</span>
-                    ))}
-                </div>
-              </div>
-            ))}
+            <InfoServices trip={trip} />
 
             <div className="sec-h">Route</div>
             {trip.stoptimes.length === 0 ? (
@@ -156,6 +142,52 @@ export function DetailPanel({ trip, onClose, onRecentre, followPaused }: {
         )}
       </div>
     </aside>
+  );
+}
+
+/* ---- info services (7.3) ------------------------------------------------- */
+
+/** Some trains file twenty-one of these, each a full sentence, which pushed the route
+ *  itself off the bottom of the panel. normalise() has already sorted the four filings
+ *  that answer "can I get on this train" to the top, so the panel shows the first
+ *  INFO_SHOWN and puts the rest behind one control. Collapsed again whenever the panel
+ *  changes train, since the count is a property of the train. */
+const INFO_SHOWN = 4;
+
+function InfoServices({ trip }: { trip: NormalisedTrip }) {
+  // Keyed by the train it was expanded for, so switching train collapses it again
+  // without an effect resetting the flag a render later.
+  const [expandedFor, setExpandedFor] = useState('');
+  const all = expandedFor === trip.id;
+
+  const hidden = trip.infoServices.length - INFO_SHOWN;
+  const shown = all ? trip.infoServices : trip.infoServices.slice(0, INFO_SHOWN);
+
+  return (
+    <>
+      {shown.map((s, i) => (
+        <div className="info" key={`${s.name}-${s.fontCode}-${i}`}>
+          <InfoPictogram fontCode={s.fontCode} />
+          <div>
+            {s.name}
+            {/* the sub-line is hidden when a single range spans the whole trip */}
+            {!(s.ranges.length === 1
+               && s.ranges[0].from === trip.origin
+               && s.ranges[0].till === trip.destination)
+              && s.ranges.map((r, j) => (
+                <span className="rng" key={j}>{r.from} – {r.till}</span>
+              ))}
+          </div>
+        </div>
+      ))}
+      {hidden > 0 && (
+        <button className="err-btn info-more"
+                onClick={() => setExpandedFor(all ? '' : trip.id)}>
+          <Icon id={all ? 'i-up' : 'i-down'} size={13} />
+          {all ? 'Fewer services' : `Show ${hidden} more service${hidden > 1 ? 's' : ''}`}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -341,10 +373,14 @@ function StopRow({ stop, grew }: { stop: NormalisedStop; grew: number }) {
           )}
         </div>
       </div>
+      {/* Each cell is coloured by ITS OWN delay. A train that arrives late and stands in
+          the platform until its booked departure leaves on time, so the arrival is red
+          and the departure green. Reading arrivalDelay for both is what painted that
+          departure red. */}
       <TimeCell scheduled={stop.scheduledArrival} realtime={stop.arrival}
                 realtimeBacked={stop.isRealtime} late={(stop.arrivalDelay ?? 0) >= 60} />
       <TimeCell scheduled={stop.scheduledDeparture} realtime={stop.departure}
-                realtimeBacked={stop.isRealtime} late={(stop.arrivalDelay ?? 0) >= 60} />
+                realtimeBacked={stop.isRealtime} late={(stop.departureDelay ?? 0) >= 60} />
     </li>
   );
 }

@@ -1,3 +1,4 @@
+import { proxyGet } from '@/lib/proxy';
 import { resolveImagePath, VW_HEADERS, VW_TIMEOUT_MS } from '@/lib/vagonweb';
 
 /**
@@ -22,10 +23,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const res = await fetch(target, {
-      headers: VW_HEADERS,
-      signal: AbortSignal.timeout(VW_TIMEOUT_MS),
-    });
+    // Through the VPS proxy, like every other vagonweb call. The drawing is cached for
+    // 30 days by the browser and the CDN, so this is one proxied request per drawing per
+    // month rather than one per panel open.
+    const res = await proxyGet(target, VW_HEADERS, VW_TIMEOUT_MS);
     if (!res.ok) {
       console.error('[vehicle-image] upstream error', { target, status: res.status });
       // The card falls back to our own silhouette, which is load-bearing rather than
