@@ -8,6 +8,7 @@ import type { NormalisedTrip } from '@/lib/types';
 import { delayColor } from '@/lib/delay';
 import { fmtServiceDay, mss } from '@/lib/time';
 import { setSearchCentre } from './Search';
+import { placeCard } from './HoverCard';
 
 /** The map and the marker layer. Leaflet directly, no react-leaflet: 300 to 400 markers
  *  are mutated in place every poll and animated by transforms we write ourselves, so the
@@ -116,10 +117,7 @@ export default function MapView({ onHover, onSelect, handleRef, cardRef, panelOp
     if (!id) return;
     const p = markerPoint(id);
     const el = cardRef.current;
-    if (p && el) {
-      el.style.left = `${p.x}px`;
-      el.style.top = `${p.y}px`;
-    }
+    if (p && el) placeCard(el, p);
     rafRef.current = requestAnimationFrame(trackHover);
   }
 
@@ -216,6 +214,9 @@ export default function MapView({ onHover, onSelect, handleRef, cardRef, panelOp
       state.marker.remove();
       markers.delete(id);
     }
+    // The open card follows the poll: new data for its train, or closed with the marker.
+    const hovered = hoverIdRef.current;
+    if (hovered) emitHover(markers.has(hovered) ? hovered : null);
     syncSelection();
   }
 
@@ -228,20 +229,33 @@ export default function MapView({ onHover, onSelect, handleRef, cardRef, panelOp
     followSelected();
   }
 
+  /** ONE pair of timers for the whole layer, never one per marker. With per-marker
+   *  timers a fast move from A to B let A's pending close fire after B had opened, and
+   *  the card vanished with the pointer resting on B. */
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function clearHoverTimers() {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    openTimer.current = closeTimer.current = null;
+  }
+
   function attachPointer(state: MarkerState, id: string) {
     const map = mapRef.current!;
-    let openTimer: ReturnType<typeof setTimeout> | null = null;
-    let closeTimer: ReturnType<typeof setTimeout> | null = null;
     const el = state.root;
     el.style.touchAction = 'none';
 
     el.addEventListener('mouseenter', () => {
-      if (closeTimer) clearTimeout(closeTimer);
-      openTimer = setTimeout(() => emitHover(id), 60);              // opens after 60 ms
+      clearHoverTimers();
+      if (hoverIdRef.current === id) return;
+      // A card already open for another train switches at once; only a card opening
+      // from nothing waits the 60 ms that keeps a pointer sweeping the map quiet.
+      if (hoverIdRef.current) { emitHover(id); return; }
+      openTimer.current = setTimeout(() => emitHover(id), 60);
     });
     el.addEventListener('mouseleave', () => {
-      if (openTimer) clearTimeout(openTimer);
-      closeTimer = setTimeout(() => emitHover(null), 120);          // 120 ms grace
+      clearHoverTimers();
+      closeTimer.current = setTimeout(() => emitHover(null), 120);  // 120 ms grace
     });
     let fromTouch = false;
     el.addEventListener('touchend', () => { fromTouch = true; }, { passive: true });

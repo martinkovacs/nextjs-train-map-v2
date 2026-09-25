@@ -148,11 +148,10 @@ export function DetailPanel({ trip, onClose, onRecentre, followPaused }: {
 /* ---- info services (7.3) ------------------------------------------------- */
 
 /** Some trains file twenty-one of these, each a full sentence, which pushed the route
- *  itself off the bottom of the panel. normalise() has already sorted the four filings
- *  that answer "can I get on this train" to the top, so the panel shows the first
- *  INFO_SHOWN and puts the rest behind one control. Collapsed again whenever the panel
- *  changes train, since the count is a property of the train. */
-const INFO_SHOWN = 4;
+ *  itself off the bottom of the panel. normalise() has already sorted the filings that
+ *  answer "can I get on this train" to the top and flagged them promoted, so the panel
+ *  shows only those and puts the rest behind one control. Collapsed again whenever the
+ *  panel changes train, since the count is a property of the train. */
 
 function InfoServices({ trip }: { trip: NormalisedTrip }) {
   // Keyed by the train it was expanded for, so switching train collapses it again
@@ -160,8 +159,9 @@ function InfoServices({ trip }: { trip: NormalisedTrip }) {
   const [expandedFor, setExpandedFor] = useState('');
   const all = expandedFor === trip.id;
 
-  const hidden = trip.infoServices.length - INFO_SHOWN;
-  const shown = all ? trip.infoServices : trip.infoServices.slice(0, INFO_SHOWN);
+  const promoted = trip.infoServices.filter((s) => s.promoted).length;
+  const hidden = trip.infoServices.length - promoted;
+  const shown = all ? trip.infoServices : trip.infoServices.slice(0, promoted);
 
   return (
     <>

@@ -198,7 +198,7 @@ export function Composition({ trip, record, active, variant, onClose }: {
 
       <div className="cxFoot">
         {state.phase === 'ready'
-          ? <Footer data={state.data} url={url} />
+          ? <Footer data={state.data} trip={trip} url={url} />
           : <span>Fetching from vagonweb.cz</span>}
       </div>
     </>
@@ -235,18 +235,8 @@ function Loaded({ data, trip, variant, tab, setTab }: {
   data: ParsedComposition; trip?: NormalisedTrip; variant: 'card' | 'page';
   tab: number; setTab: (n: number) => void;
 }) {
-  // Route sections: show only the section whose stretch overlaps the trip. A MÁV trip
-  // never reaches München to Salzburg, so never draw it.
-  const stops = new Set((trip?.stoptimes ?? []).map((s) => s.name.toLowerCase()));
-  const windows = data.windows.filter((w) => {
-    if (!w.section || !stops.size) return true;
-    return w.section.split(/\s*-\s*/).some((end) => stops.has(end.trim().toLowerCase()));
-  });
-  // Show the window containing today when one is in force; when none is, the page has
-  // rendered all of them and the first is the one to draw (SPEC 6.5).
   const [today] = useState(() => Math.floor(Date.now() / 1000));
-  const planned = windows.find((w) => w.from != null && w.to != null
-    && today >= w.from && today <= w.to + 86399) ?? windows[0] ?? null;
+  const { windows, planned } = planFor(data, trip, today);
   const days = data.days;
 
   const sets = [
@@ -284,7 +274,7 @@ function Loaded({ data, trip, variant, tab, setTab }: {
               ? <span dangerouslySetInnerHTML={{
                   __html: compositionSentence(baseline.vehicles, set.vehicles) }} />
               : 'No plan on file for that date.')
-          : `Planned composition, ${planned?.label ?? ''}`}
+          : ['Planned composition', planned?.label].filter(Boolean).join(', ')}
       </div>
 
       <div className="cxFront">front of train</div>
@@ -295,21 +285,52 @@ function Loaded({ data, trip, variant, tab, setTab }: {
   );
 }
 
-function windowForDay(windows: PlannedWindow[], day: ReportedDay) {
+/** The dated window containing the day; failing that, a window with no dates at all,
+ *  which vagonweb prints for a plan in force all timetable year (every sectioned RJX
+ *  window is one). Only a day that falls outside every DATED window while no undated one
+ *  exists has no plan on file. */
+function windowForDay(windows: PlannedWindow[], day: { date: number | null }) {
   if (day.date == null) return null;
   return windows.find((w) => w.from != null && w.to != null
-    && day.date! >= w.from && day.date! <= w.to + 86399) ?? null;
+    && day.date! >= w.from && day.date! <= w.to + 86399)
+    ?? windows.find((w) => w.from == null && w.to == null)
+    ?? null;
 }
 
-function Footer({ data, url }: { data: ParsedComposition; url: string }) {
+/** The windows this trip can use, and the one the Planned tab and the footer draw.
+ *
+ *  Route sections: only the section whose stretch overlaps the trip. A MÁV trip never
+ *  reaches München to Salzburg, so never draw it. vagonweb names a section by CITY
+ *  ("Budapest - Wien") where MÁV names the station ("Budapest-Keleti", "Wien Hbf"), so an
+ *  end matches a stop that is the city or starts with it. A filter that would leave
+ *  nothing keeps every window instead: an empty Planned tab is always the wrong answer.
+ *
+ *  Planned: the window in force today. When none is, the page has rendered all of them
+ *  and the most recent one to have started is the best guess at what runs now; before
+ *  the first one starts, the first. */
+function planFor(data: ParsedComposition, trip: NormalisedTrip | undefined, today: number) {
+  const stops = (trip?.stoptimes ?? []).map((s) => s.name.toLowerCase());
+  const atStop = (end: string) => stops.some((n) => n === end
+    || n.startsWith(`${end}-`) || n.startsWith(`${end} `));
+  const inTrip = data.windows.filter((w) => !w.section || !stops.length
+    || w.section.split(/\s+-\s+/).some((end) => atStop(end.trim().toLowerCase())));
+  const windows = inTrip.length ? inTrip : data.windows;
+  const started = windows.filter((w) => w.from != null && w.from <= today)
+    .sort((a, b) => b.from! - a.from!);
+  const planned = windowForDay(windows, { date: today }) ?? started[0] ?? windows[0] ?? null;
+  return { windows, planned };
+}
+
+function Footer({ data, trip, url }: {
+  data: ParsedComposition; trip?: NormalisedTrip; url: string;
+}) {
   const [today] = useState(() => Math.floor(Date.now() / 1000));
-  const planned = data.windows.find((w) => w.from != null && w.to != null
-    && today >= w.from && today <= w.to + 86399) ?? data.windows[0];
+  const { planned } = planFor(data, trip, today);
   return (
     <>
       <span>
-        Planned {planned?.label ?? 'composition'}
-        {planned?.section ? ` (${planned.section})` : ''}
+        Planned {planned?.label || 'composition'}
+        {planned?.section && planned.section !== planned.label ? ` (${planned.section})` : ''}
       </span>
       <span>
         {data.days.length
@@ -347,7 +368,7 @@ function useScale<T extends HTMLElement>(vehicles: Vehicle[], max: number, reser
 }
 
 function Strip({ seq }: { seq: DiffEntry[] }) {
-  const ref = useScale<HTMLDivElement>(seq.map((x) => x.v), 0.6);
+  const ref = useScale<HTMLDivElement>(seq.map((x) => x.v), 0.8);
   return (
     <div className="cxStrip cxScroll" ref={ref}>
       {seq.map((x, i) => <Tile key={i} v={x.v} mark={x.mark} />)}
@@ -419,8 +440,9 @@ function Tile({ v, mark }: { v: Vehicle; mark: string }) {
         <span className="ty">{v.type}</span>
       </div>
       <div className="cxSer">{mark === 'miss' ? 'did not run' : v.ser ?? ''}</div>
-      <Seats v={v} />
-      <div className="cxAm"><Amenities v={v} /></div>
+      {/* seats lead the amenity row rather than taking a line of their own: the wider
+          tile fits both, and the height saved goes to the drawing */}
+      <div className="cxAm"><Seats v={v} /><Amenities v={v} /></div>
       {v.note && <div className="cxNote">{v.note}</div>}
     </div>
   );

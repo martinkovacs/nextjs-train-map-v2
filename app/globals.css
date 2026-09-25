@@ -303,8 +303,9 @@ body {
    ============================================================================ */
 .cxCard { --cls1:#d9a01f; --cls2:#93a3bb; --clsx:#8b2f4a; --clsd:#2f7d4f; --sc:.6;
           background:var(--w); color:var(--w-ink); overflow:hidden }
+/* as wide as the map beside the 420 px panel allows, up to 820 px */
 .cxDock { position:absolute; z-index:650; left:12px; bottom:12px;
-          width:min(560px, calc(100vw - 24px)) }
+          width:clamp(min(560px, calc(100vw - 24px)), calc(100vw - 456px), 820px) }
 .cxHead { display:flex; align-items:center; gap:9px; padding:11px 13px;
           border-bottom:1px solid var(--w-line) }
 .cxHead .t { font-weight:700; font-size:15px }
@@ -360,6 +361,7 @@ body {
 .cxAm .n { font:600 11px/16px var(--mono) }
 .cxSeats { margin-top:7px; color:#6b7280 }
 .cxSeats .p { gap:5px; font:700 12.5px/16px var(--mono); font-variant-numeric:tabular-nums }
+.cxAm .cxSeats { margin:0 3px 0 0 }
 .cxNote { font:500 11.5px/1.4 var(--sans); color:#9aa1ae; margin-top:4px }
 .cxAltHd { font:600 10px/1 var(--sans); letter-spacing:.06em; text-transform:uppercase;
            color:#9aa1ae; margin-top:8px }

@@ -13,16 +13,18 @@ export type DiffEntry = { v: Vehicle; from?: Vehicle; mark: Mark; slot: number }
  *  whole tail reports as changed.
  *
  *      slot(v, i) =
- *          v.isLoco  ?  (i === 0 ? -1 : 1000 + i)   // a leading loco sorts first,
- *                                                   // a rear or banking loco last
+ *          v.isLoco  ?  (i === 0 ? -1               // a leading loco sorts first,
+ *                        : last ? 2000 : 1000 + i)  // the rear loco last
  *        : v.number  ?  parseInt(v.number, 10)      // 409, 410, 411 ...
  *        :              500 + i                     // no number: out of the numbered
  *                                                   // range, still stable
  *
  *  parseInt, not Number(): a car number is not always a number. 937 ran twice as a single
  *  815 unit numbered "11-16", which Number() turns into NaN and the sort into nonsense. */
-export function slotOf(v: Vehicle, i: number): number {
-  if (v.isLoco) return i === 0 ? -1 : 1000 + i;
+export function slotOf(v: Vehicle, i: number, all: Vehicle[] = []): number {
+  // a loco at the tail is THE rear loco whatever the train's length, or a train running
+  // one coach short would report its banking loco as missing and again as extra
+  if (v.isLoco) return i === 0 ? -1 : i === all.length - 1 ? 2000 : 1000 + i;
   const n = parseInt(v.no ?? '', 10);
   return Number.isFinite(n) ? n : 500 + i;
 }
@@ -33,8 +35,10 @@ export function slotOf(v: Vehicle, i: number): number {
 const kind = (v: Vehicle) => (v.isLoco ? `loco ${v.type}` : v.type);
 
 /** A slot vagonweb fills with EITHER of two machines matches either, so 849 turning up
- *  behind its 490 is the plan and not a substitution. */
-const kinds = (v: Vehicle) => (v.alt ? v.alt.map((a) => (a.isLoco ? `loco ${a.type}` : a.type)) : [kind(v)]);
+ *  behind its 490 is the plan and not a substitution. The same goes for a type vagonweb
+ *  writes as alternatives, `By/Byee`: a By or a Byee running there is the plan. */
+const kinds = (v: Vehicle) => (v.alt ?? [v]).flatMap((a) =>
+  a.type.split('/').map((t) => (a.isLoco ? `loco ${t.trim()}` : t.trim())));
 const same = (p: Vehicle, a: Vehicle) => kinds(p).some((k) => kinds(a).includes(k));
 
 /** 2. Each slot yields exactly one outcome, which is what makes it impossible for one
@@ -52,17 +56,17 @@ export function diffComposition(planned: Vehicle[], reported: Vehicle[]): DiffEn
   carSlots.forEach((s, i) => { if (!firstReported.has(s)) firstReported.set(s, i); });
 
   // where each missing vehicle goes back: after the reported vehicle it followed
-  const gaps = new Map<number, Vehicle[]>();
+  const gaps = new Map<number, number[]>();
   let after = -1;
-  planned.forEach((v, i) => {
-    const s = planSlots[i];
-    const at = firstReported.get(s);
+  planned.forEach((_, i) => {
+    const at = firstReported.get(planSlots[i]);
     if (at != null) { after = at; return; }
     const list = gaps.get(after);
-    if (list) list.push(v); else gaps.set(after, [v]);
+    if (list) list.push(i); else gaps.set(after, [i]);
   });
+  const missing = (i: number): DiffEntry => ({ v: planned[i], mark: 'miss', slot: planSlots[i] });
 
-  const out: DiffEntry[] = (gaps.get(-1) ?? []).map((v, i) => ({ v, mark: 'miss', slot: slotOf(v, i) }));
+  const out: DiffEntry[] = (gaps.get(-1) ?? []).map(missing);
   const used = new Set<number>();
   reported.forEach((a, i) => {
     const s = carSlots[i];
@@ -71,7 +75,7 @@ export function diffComposition(planned: Vehicle[], reported: Vehicle[]): DiffEn
     out.push(p
       ? { slot: s, v: a, from: p, mark: same(p, a) ? '' : 'chg' }
       : { slot: s, v: a, mark: 'add' });
-    (gaps.get(i) ?? []).forEach((v) => out.push({ v, mark: 'miss', slot: slotOf(v, 0) }));
+    (gaps.get(i) ?? []).forEach((j) => out.push(missing(j)));
   });
   return out;
 }
@@ -115,9 +119,10 @@ export function compositionSentence(planned: Vehicle[], reported: Vehicle[]): st
 
   const parts = clauses(seq).map((c) => {
     const loco = c.v.isLoco;
+    // the car number belongs to the vehicle that ran: "411 Apee in place of Apmz"
     if (c.mark === 'chg') {
-      return `<b class="m-chg">${loco ? 'loco ' : ''}${c.v.type}</b> in place of `
-        + `${loco ? '' : list(c.nums)}${c.from?.type ?? ''}`;
+      return `<b class="m-chg">${loco ? `loco ${c.v.type}` : list(c.nums) + c.v.type}</b>`
+        + ` in place of ${c.from?.type ?? ''}`;
     }
     const who = `<b class="m-${c.mark}">${loco ? `loco ${c.v.type}` : list(c.nums) + c.v.type}</b>`;
     if (c.mark === 'add') return loco ? `an extra ${who}` : `${who} extra`;

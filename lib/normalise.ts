@@ -206,7 +206,8 @@ function unionAlerts(legs: Leg[], now: number): Alert[] {
  *  train and where do I sit", so they sort above everything else whatever their own
  *  order: seat reservation compulsory (18), reservable (16), compulsory domestically and
  *  optional internationally (19), and usable without a seat reservation on the marked
- *  section (23). Everything else keeps the feed's own order below them (7.3). */
+ *  section (23). Everything else keeps the feed's own order below them, and the panel
+ *  shows only these four until asked for the rest (7.3). */
 const PROMOTED_INFO_ORDERS = new Set([16, 18, 19, 23]);
 
 function unionInfoServices(legs: Leg[]): InfoService[] {
@@ -227,7 +228,7 @@ function unionInfoServices(legs: Leg[]): InfoService[] {
       const order = s.order ?? 0;
       const existing = byKey.get(key);
       if (!existing) {
-        byKey.set(key, { name, fontCode, order, ranges: [{ from, till }] });
+        byKey.set(key, { name, fontCode, order, promoted: false, ranges: [{ from, till }] });
       } else {
         existing.order = Math.min(existing.order, order);
         if (!existing.ranges.some((r) => r.from === from && r.till === till)) {
@@ -236,8 +237,10 @@ function unionInfoServices(legs: Leg[]): InfoService[] {
       }
     }
   }
-  const rank = (s: InfoService) => (PROMOTED_INFO_ORDERS.has(s.order) ? 0 : 1);
-  return [...byKey.values()].sort((a, b) => rank(a) - rank(b) || a.order - b.order);
+  const rows = [...byKey.values()];
+  for (const s of rows) s.promoted = PROMOTED_INFO_ORDERS.has(s.order);
+  const rank = (s: InfoService) => (s.promoted ? 0 : 1);
+  return rows.sort((a, b) => rank(a) - rank(b) || a.order - b.order);
 }
 
 /* ---- delay resolution (7.2) ---------------------------------------------- */

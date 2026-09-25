@@ -40,7 +40,7 @@ export type Vehicle = {
 };
 
 export type PlannedWindow = {
-  label: string;            // "14.12.2025 - 15.3.2026", as the page writes it
+  label: string;            // "14.12.2025 - 15.3.2026", as the page writes it; may be ''
   section: string | null;   // "München - Salzburg" on a sectioned train
   category: string | null;  // from this block's own info_vlak
   record: string;           // the block's own info_vlak, for the verify check
@@ -190,9 +190,10 @@ function parseVehicle($: cheerio.CheerioAPI, cell: Element, alts: Map<string, Al
       : cellBands;
     // A locomotive is drawn out of vagonweb's loco folders. The fallback is deliberately
     // narrow: a 415 Flirt unit is numbered like a class and is not a locomotive, and its
-    // seats and class band both disqualify it.
+    // seats and class band both disqualify it. Four digits too: ÖBB's 1144 lives in the
+    // operator's own folder, not a loco one.
     const isLoco = /\/(ELOC|DLOC|PARNI)\//i.test(rawSrc)
-      || (!parsed?.seats && !no && bands.every((b) => b === 'none') && /^\d{3}$/.test(type));
+      || (!parsed?.seats && !no && bands.every((b) => b === 'none') && /^\d{3,4}$/.test(type));
     return {
       no,
       op: parsed?.op ?? '',
@@ -283,7 +284,10 @@ export function parseCompositionPage(html: string, zeme: string): ParsedComposit
     if (/Plánované/.test(heading) || dates.length >= 2) {
       windows.push({
         label: dates.length >= 2 ? `${dates[0].raw} - ${dates[dates.length - 1].raw}`
-          : heading.replace(/^Plánované řazení\s*/, '') || 'composition',
+          // a sectioned window's heading is "v úseku: Budapest - Wien"; the label is the
+          // section alone, never vagonweb's Czech prose around it
+          // and an undated, unsectioned window has no label at all, never a placeholder
+          : heading.replace(/^Plánované řazení\s*/, '').replace(/^v\s+úseku:?\s*/i, ''),
         section: sectionOf(heading, infoVlak),
         category: categoryFrom(infoVlak, zeme),
         record: infoVlak,

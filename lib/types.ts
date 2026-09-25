@@ -83,6 +83,7 @@ export type InfoService = {
   name: string;
   fontCode: number;
   order: number;          // the LOWEST order of the filings collapsed into this row (§7.3)
+  promoted: boolean;      // a seat-reservation filing (orders 16, 18, 19, 23), shown unfolded
   ranges: { from: string; till: string }[];
 };
 

@@ -780,8 +780,9 @@ the 24 px `i-close`: the panel is the whole screen there and this is the only wa
    physical train (§7.1, §8). When the delay is carried forward it gets one more line, `+53 min at
    Hegyeshalom` (§7.2).
 2. **Alerts** — every currently-effective alert, no tabs.
-3. **Info services** — sorted per §7.3, **the first four shown and the rest behind one control**,
-   no tabs. A train can file twenty-one of them, each a full sentence, and unfolded they push the
+3. **Info services** — sorted per §7.3, **only the seat-reservation filings (orders 16, 18, 19,
+   23) shown and the rest behind one control**, no tabs. A train with none of them shows the
+   control alone. A train can file twenty-one of them, each a full sentence, and unfolded they push the
    route itself off the bottom of the panel. The control reads `Show N more services` and toggles
    to `Fewer services`; it is keyed by the train it was expanded for, so changing train collapses
    it again.
@@ -897,7 +898,8 @@ traps); `plan.html` §4b is the visual reference. This section is what the app r
 lives.
 
 **Placement.** Desktop: its own floating card at the bottom-left of the map, independent of the
-detail panel. Mobile: **a page of the detail panel, one swipe across from the route**, with a back
+detail panel, as wide as the map beside the panel allows (560 to 820 px). The seat count leads
+each tile's amenity row rather than taking a line of its own. Mobile: **a page of the detail panel, one swipe across from the route**, with a back
 control and a two-dot pager in the header; the train runs *down* the screen, one vehicle per row,
 at its natural size with the number, type, seats and amenities under it. Nothing scrolls sideways
 on a phone. Opened from a vagonweb search row (§4.1) there is no route page behind it, so **no
@@ -951,15 +953,21 @@ record, not for more of this one. Verified 12 Aug 2026 against `EN 462`,
   (N)`, then renders **only the window covering today** when one does (`937`: 1 of 3, `462`: 1 of
   2). When none is in force it renders **all of them** (`849 IC`: 4 of 4, because in August that
   number runs under its `Ex` record). A sectioned train gets one window **per section** (`RJX 63`:
-  München–Salzburg, Salzburg–Wien, Wien–Budapest).
-- **A reported day is diffed against the window that contained that day, never today's.** Diffing
+  München–Salzburg, Salzburg–Wien, Wien–Budapest). **The Planned tab draws the window in force
+  today; when none is, the most recent one to have started** (before the first starts, the first).
+  A window with **no dates at all** is a plan for the whole timetable year, which is how every
+  sectioned RJX window comes back.
+- **A reported day is diffed against the window that contained that day, never today's.** A day
+  inside no dated window falls back to an undated window when there is one. Diffing
   against the wrong baseline is worse than not diffing: a March day against the May plan reports
   three coaches missing that were never meant to be there.
 - **When that window is not on the page, the day renders undiffed**, with *"No plan on file for
   that date."* — same wording as the cross-record case in `plan/vagonweb.md`. Uncommon: all twelve
   reported days measured fell inside the current window.
 - **Route sections:** show only the section whose stretch overlaps the trip. A MÁV trip never
-  reaches München–Salzburg, so never draw it.
+  reaches München–Salzburg, so never draw it. A section is named by **city** (`Budapest - Wien`)
+  where a stop is named by **station** (`Budapest-Keleti`, `Wien Hbf`), so an end matches a stop
+  equal to it or starting with it; if nothing matches, every window stays.
 
 ### The vehicle list
 
@@ -999,7 +1007,7 @@ record, not for more of this one. Verified 12 Aug 2026 against `EN 462`,
 the vehicle's length and a strip built from them is to scale. Keep that for the silhouette fallback
 too, or a missing drawing changes the length of the train. Vehicles run from a 19 m locomotive to a
 154 m 815 double-decker, so **each view divides its width by the longest vehicle it is about to
-draw** and never exceeds its own maximum (0.6 desktop strip, 1.0 mobile list). A long train still
+draw** and never exceeds its own maximum (0.8 desktop strip, 1.0 mobile list). A long train still
 scrolls sideways on desktop; a single vehicle never has to. A window resize **re-scales only** and
 does not re-render, or it throws away the reported day you were looking at.
 
@@ -1040,7 +1048,10 @@ reported twice:
 | reported only | | **extra**, green outline | reported | *415 Bpmee extra* |
 | planned only | | **missing**, red dashed outline | **planned**, silhouette in red, never its photo | *409 Byee missing* |
 
-*Vehicle kind* is the coach type (`Byee`, `Apmz`) or, for a locomotive, `loco <class>`. **Nothing
+*Vehicle kind* is the coach type (`Byee`, `Apmz`) or, for a locomotive, `loco <class>`. A type
+written as alternatives (`By/Byee`) matches any of them. A locomotive at the **tail** takes one
+fixed slot whatever the train's length, so a train one coach short does not report its rear loco
+as both missing and extra. **Nothing
 else is compared:** a coach that kept its number and type but gained Wi-Fi is not a difference. A
 slot vagonweb fills with **either of two machines** matches either, so `849` turning up behind its
 490 is the plan and not a substitution.
@@ -1419,7 +1430,7 @@ estimated batch, the speed slot and transit row label are **empty**, not `0 km/h
 | `stopPosition` gaps | `1,2,…,6,8,…` — stops this trip does not call at. Render nothing, no placeholders. |
 | `platformColor` | `green` = confirmed live by the station system, render `#15803d`. `black` = timetable value, neutral. `red` = **platform changed from the timetable**, render `--red`; normal, not an edge case. Never use the API string as a CSS colour. **A null `platformCode` renders nothing at all, whatever the colour** — `green` with a null code is common, and a confirmation with no value to confirm is not something to show. |
 | `realtimeState` | `MODIFIED`/`UPDATED`: show realtime. `SCHEDULED`: one grey time, no strike-through, and **no usable delay on that stop** (§7.2). |
-| Info services | **Render only `displayable: true`**, then sort by `order`. (Every service in every capture is `true`; the filter is for the day one is not.) **One row per `name` + `fontCode`, carrying every distinct stop range it was filed under**, each a `fromStop.name` to `tillStop.name` sub-line, the sub-line hidden when a single range spans the whole trip. The same service is legitimately filed several times over different stretches — `351 DRÁVA` carries *Csatlakozásra nem vár* five times at five stations, and a merged trip adds one filing per leg — and five identical rows differing only in a range read as a rendering bug. **Nothing else is ever merged:** differing name or `fontCode` means two rows, whatever the ranges. **The collapsed row sorts on the lowest `order` of its filings**, since a merged trip's legs need not agree: the lowest keeps the row where MÁV put it at its highest and stops the list reshuffling as a leg loses its realtime. **Orders 16, 18, 19 and 23 sort above everything else**, keeping `order` among themselves; everything else keeps the feed's order below them. Those four are the seat-reservation filings — reservable, compulsory, compulsory domestically and optional internationally, and usable without one on the marked section — and they are the only ones that answer the question the panel is open for, which is whether you can get on this train and where you sit. With the list collapsed to four rows (§6) they are also what is left visible. |
+| Info services | **Render only `displayable: true`**, then sort by `order`. (Every service in every capture is `true`; the filter is for the day one is not.) **One row per `name` + `fontCode`, carrying every distinct stop range it was filed under**, each a `fromStop.name` to `tillStop.name` sub-line, the sub-line hidden when a single range spans the whole trip. The same service is legitimately filed several times over different stretches — `351 DRÁVA` carries *Csatlakozásra nem vár* five times at five stations, and a merged trip adds one filing per leg — and five identical rows differing only in a range read as a rendering bug. **Nothing else is ever merged:** differing name or `fontCode` means two rows, whatever the ranges. **The collapsed row sorts on the lowest `order` of its filings**, since a merged trip's legs need not agree: the lowest keeps the row where MÁV put it at its highest and stops the list reshuffling as a leg loses its realtime. **Orders 16, 18, 19 and 23 sort above everything else**, keeping `order` among themselves; everything else keeps the feed's order below them. Those four are the seat-reservation filings — reservable, compulsory, compulsory domestically and optional internationally, and usable without one on the marked section — and they are the only ones that answer the question the panel is open for, which is whether you can get on this train and where you sit. With the list collapsed (§6) they are the only rows left visible. |
 | Alerts | Only those currently in effect, filtered on `effectiveStartDate`/`effectiveEndDate` against now, which does real work: expired alerts are present on most polls. Render **`alertDescriptionText`**; `alertHeaderText` is empty and `alertUrl` null throughout, so no header fallback and no URL affordance. |
 | Headline delay | The trip's **resolved delay**, §7.2. Based on the next stop, which is what a waiting passenger cares about, but never read straight off `arrivalDelay`. |
 | `stopRelationship` | Null means the trip is not running. Never a data error, never a reason to hide a train on its own. §7.1. |

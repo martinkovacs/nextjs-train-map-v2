@@ -7,6 +7,27 @@ import { Delay } from './Delay';
 import { fmtTime, kmh } from '@/lib/time';
 import type { NormalisedTrip } from '@/lib/types';
 
+const EDGE = 8;        // the card never comes closer than this to the map's edge
+const TOP_CLEAR = 64; // nor tucks under the search field, which sits above it
+const GAP = 22;       // marker centre to the card's near edge
+
+/** Put the card on its marker, kept inside the visible map: slid sideways at the left and
+ *  right edges and beside the open panel, and flipped BELOW the marker when there is no
+ *  room above it. Both the opening render and MapView's per-frame tracking call this, so
+ *  the two can never disagree about where the card goes. */
+export function placeCard(el: HTMLElement, p: { x: number; y: number }) {
+  const w = el.offsetWidth, h = el.offsetHeight;
+  const panel = window.innerWidth > 900
+    ? document.querySelector<HTMLElement>('aside.panel') : null;
+  const right = window.innerWidth - (panel?.offsetWidth ?? 0);
+  const x = Math.max(w / 2 + EDGE, Math.min(p.x, right - w / 2 - EDGE));
+  const below = p.y - GAP - h < TOP_CLEAR;
+  el.style.left = `${x}px`;
+  el.style.top = `${p.y}px`;
+  el.style.transform = below
+    ? `translate(-50%, ${GAP}px)` : `translate(-50%, calc(-100% - ${GAP}px))`;
+}
+
 /** Hover card, design D: icon rows plus an alert list. 330 px, base font 13 px.
  *
  *  Both middle rows are .ttD-row, which forces one font family, one size (14.5 px) and
@@ -20,8 +41,7 @@ export function HoverCard({ trip, point, ref }: {
   // writing it every frame afterwards to follow the marker. An inline left/top would be
   // reapplied on the next poll's re-render and snap the card back to where it opened.
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (el) { el.style.left = `${point.x}px`; el.style.top = `${point.y}px`; }
+    if (ref.current) placeCard(ref.current, point);
   }, [ref, point]);
 
   const stop = trip.nextStop ? trip.stoptimes.find((s) => s.name === trip.nextStop) : null;
@@ -40,11 +60,7 @@ export function HoverCard({ trip, point, ref }: {
           sched: !(stop?.isRealtime ?? false), stop };
 
   return (
-    <div
-      ref={ref}
-      className="card tt"
-      style={{ transform: 'translate(-50%, calc(-100% - 22px))' }}
-    >
+    <div ref={ref} className="card tt">
       <div className="tt-hd" style={{ ['--type' as string]: trip.typeColor } as React.CSSProperties}>
         <RouteBadge fontCode={trip.fontCode} typeColor={trip.typeColor} />
         <span className="title">
